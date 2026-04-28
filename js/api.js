@@ -86,6 +86,120 @@ export async function upsertSnapshot({ account_id, snapshot_date, balance, unrea
   return data;
 }
 
+// 月次の月末日 (snapshot_dateの規約と統一)
+export function monthEndDate(year, month1to12) {
+  const d = new Date(year, month1to12, 0);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// ============================================================
+// 収入 (incomes)
+// ============================================================
+export async function listIncomes({ fromDate, toDate } = {}) {
+  let q = supabase
+    .from('incomes')
+    .select('id, earner_profile_id, occurred_on, amount, category, note')
+    .order('occurred_on', { ascending: true });
+  if (fromDate) q = q.gte('occurred_on', fromDate);
+  if (toDate)   q = q.lte('occurred_on', toDate);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data ?? [];
+}
+
+// 指定月の収入を全置換 (delete then insert)
+export async function replaceMonthlyIncomes({ year, month, rows }) {
+  const profile = await getMyProfile();
+  if (!profile) throw new Error('プロファイルが見つかりません');
+  const date = monthEndDate(year, month);
+
+  const { error: delErr } = await supabase
+    .from('incomes')
+    .delete()
+    .eq('household_id', profile.household_id)
+    .eq('occurred_on', date);
+  if (delErr) throw delErr;
+
+  if (rows.length === 0) return [];
+  const { data, error } = await supabase
+    .from('incomes')
+    .insert(rows.map(r => ({
+      household_id: profile.household_id,
+      earner_profile_id: r.earner_profile_id ?? null,
+      occurred_on: date,
+      amount: r.amount,
+      category: r.category,
+      note: r.note ?? null,
+    })))
+    .select();
+  if (error) throw error;
+  return data ?? [];
+}
+
+// ============================================================
+// 支出 (transactions) — 月次集計入力用 (source='monthly_manual')
+// ============================================================
+export async function listMonthlyTransactions({ fromDate, toDate } = {}) {
+  let q = supabase
+    .from('transactions')
+    .select('id, occurred_on, amount, category, description, source')
+    .eq('source', 'monthly_manual')
+    .order('occurred_on', { ascending: true });
+  if (fromDate) q = q.gte('occurred_on', fromDate);
+  if (toDate)   q = q.lte('occurred_on', toDate);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data ?? [];
+}
+
+// 指定月の monthly_manual な支出を全置換
+export async function replaceMonthlyTransactions({ year, month, rows }) {
+  const profile = await getMyProfile();
+  if (!profile) throw new Error('プロファイルが見つかりません');
+  const date = monthEndDate(year, month);
+
+  const { error: delErr } = await supabase
+    .from('transactions')
+    .delete()
+    .eq('household_id', profile.household_id)
+    .eq('occurred_on', date)
+    .eq('source', 'monthly_manual');
+  if (delErr) throw delErr;
+
+  if (rows.length === 0) return [];
+  const { data, error } = await supabase
+    .from('transactions')
+    .insert(rows.map(r => ({
+      household_id: profile.household_id,
+      occurred_on: date,
+      amount: r.amount,
+      category: r.category,
+      description: r.description ?? null,
+      source: 'monthly_manual',
+      external_id: `monthly:${date}:${r.category}`, // 重複防止
+    })))
+    .select();
+  if (error) throw error;
+  return data ?? [];
+}
+
+// ============================================================
+// 世帯設定 (households の更新)
+// ============================================================
+export async function updateHousehold({ householdId, updates }) {
+  const { data, error } = await supabase
+    .from('households')
+    .update(updates)
+    .eq('id', householdId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 // 一括 upsert (CSVインポート用)
 export async function bulkUpsertSnapshots(rows) {
   if (rows.length === 0) return [];

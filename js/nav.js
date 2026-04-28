@@ -3,6 +3,7 @@ import { signOut } from '/js/supabase.js';
 
 const links = [
   { href: '/dashboard.html',   label: 'ダッシュボード' },
+  { href: '/monthly.html',     label: '月次入力' },
   { href: '/assets.html',      label: '資産' },
   { href: '/transactions.html', label: '支出' },
   { href: '/import.html',      label: '取り込み' },

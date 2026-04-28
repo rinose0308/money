@@ -6,6 +6,7 @@
   <title>ダッシュボード | 我が家マネー</title>
   <link rel="stylesheet" href="/css/styles.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 </head>
 <body>
   <main class="container">
@@ -28,19 +29,21 @@
           <p class="card-sub" id="metric-total-sub">前月比 —</p>
         </div>
         <div class="card">
-          <p class="card-title">最終更新</p>
-          <p class="card-value" id="metric-latest" style="font-size: 1.25rem;">—</p>
-          <p class="card-sub" id="metric-latest-sub">—</p>
+          <p class="card-title">目標額</p>
+          <p class="card-value" id="metric-target">¥—</p>
+          <p class="card-sub" id="metric-target-sub">設定画面から登録</p>
         </div>
         <div class="card">
-          <p class="card-title">対象口座数</p>
-          <p class="card-value" id="metric-accounts">—</p>
-          <p class="card-sub" id="metric-accounts-sub">—</p>
+          <p class="card-title">目標まで残額</p>
+          <p class="card-value" id="metric-remaining">¥—</p>
+          <p class="card-sub" id="metric-remaining-sub">—</p>
         </div>
         <div class="card">
-          <p class="card-title">記録月数</p>
-          <p class="card-value" id="metric-months">—</p>
-          <p class="card-sub" id="metric-months-sub">—</p>
+          <p class="card-title">達成率</p>
+          <p class="card-value" id="metric-progress">—</p>
+          <div style="margin-top: 0.5rem;">
+            <div class="progress"><div class="progress-bar" id="progress-bar" style="width: 0%;"></div></div>
+          </div>
         </div>
       </div>
 
@@ -64,7 +67,7 @@
           <p>過去のCSVを取り込むか、最初の残高を入力してみましょう</p>
           <div style="display:flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
             <a href="/import.html" class="btn btn-primary">CSVを取り込む</a>
-            <a href="/assets.html" class="btn btn-ghost">残高を入力</a>
+            <a href="/monthly.html" class="btn btn-ghost">月次入力する</a>
           </div>
         </div>
       </div>
@@ -73,7 +76,7 @@
       <div class="grid cols-2" style="margin-top: 1rem;">
         <div class="card">
           <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">資産構成 (最新月)</h3>
-          <div class="chart-container" style="height: 280px;">
+          <div class="chart-container" style="height: 320px;">
             <canvas id="composition-chart"></canvas>
           </div>
           <div id="composition-empty" class="empty-state" style="display:none; padding: 2rem 1rem;">
@@ -103,6 +106,7 @@
     document.getElementById('household-greeting').textContent =
       `${auth.profile.households.name} / ${auth.profile.display_name}さん`;
 
+    const TARGET = auth.profile.households.target_total_amount; // null可
     const TYPE_LABELS = {
       bank: '預貯金', jp_stock: '日本株', foreign_stock: '外国株',
       mutual_fund: '投資信託', insurance: '保険', pension: '年金/共済', other: 'その他',
@@ -118,19 +122,55 @@
       getAssetTrend(),
     ]);
 
+    // datalabels プラグインを登録
+    Chart.register(ChartDataLabels);
+
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
+
+    // ============ 目標額カードの初期化 (データ有無に関わらず) ============
+    function renderTargetCards(currentTotal) {
+      const targetEl = document.getElementById('metric-target');
+      const targetSubEl = document.getElementById('metric-target-sub');
+      const remainEl = document.getElementById('metric-remaining');
+      const remainSubEl = document.getElementById('metric-remaining-sub');
+      const progEl = document.getElementById('metric-progress');
+      const progBar = document.getElementById('progress-bar');
+
+      if (TARGET == null || TARGET <= 0) {
+        targetEl.textContent = '未設定';
+        targetSubEl.textContent = '設定画面から登録';
+        remainEl.textContent = '—';
+        remainSubEl.textContent = '目標額を設定してください';
+        progEl.textContent = '—';
+        progBar.style.width = '0%';
+        return;
+      }
+      targetEl.textContent = formatYen(TARGET);
+      targetSubEl.textContent = formatYenShort(TARGET);
+
+      const remaining = TARGET - currentTotal;
+      remainEl.textContent = remaining > 0 ? formatYen(remaining) : '達成済 🎉';
+      if (remaining > 0) {
+        remainSubEl.textContent = `${formatYenShort(remaining)} 必要`;
+        remainSubEl.classList.remove('up');
+      } else {
+        remainSubEl.textContent = `+${formatYenShort(-remaining)} 超過達成`;
+        remainSubEl.classList.add('up');
+      }
+
+      const pct = currentTotal / TARGET * 100;
+      const clampedPct = Math.min(100, Math.max(0, pct));
+      progEl.textContent = `${pct.toFixed(1)}%`;
+      progBar.style.width = `${clampedPct}%`;
+      if (pct >= 100) progBar.style.background = 'var(--success)';
+    }
 
     if (trend.length === 0) {
       // データなし状態
       document.getElementById('metric-total').textContent = '¥0';
       document.getElementById('metric-total-sub').textContent = 'データを取り込みましょう';
-      document.getElementById('metric-latest').textContent = '—';
-      document.getElementById('metric-latest-sub').textContent = 'データなし';
-      document.getElementById('metric-accounts').textContent = String(accounts.length);
-      document.getElementById('metric-accounts-sub').textContent = '残高データ未登録';
-      document.getElementById('metric-months').textContent = '0';
-      document.getElementById('metric-months-sub').textContent = 'データなし';
+      renderTargetCards(0);
       document.getElementById('asset-empty').style.display = 'block';
       document.querySelector('#asset-chart').style.display = 'none';
       document.getElementById('composition-empty').style.display = 'block';
@@ -157,21 +197,10 @@
         document.getElementById('metric-total-sub').textContent = '前月データなし';
       }
 
-      // カード2: 最終更新
-      document.getElementById('metric-latest').textContent = latest.date;
-      const accountsWithLatest = Object.keys(latest.byAccount).length;
-      document.getElementById('metric-latest-sub').textContent = `${accountsWithLatest}口座を記録`;
-
-      // カード3: 対象口座数
-      document.getElementById('metric-accounts').textContent = String(accounts.filter(a => a.is_active).length);
-      document.getElementById('metric-accounts-sub').textContent = `(全${accounts.length}口座中)`;
-
-      // カード4: 記録月数
-      document.getElementById('metric-months').textContent = String(trend.length);
-      document.getElementById('metric-months-sub').textContent = `${trend[0].date} 〜`;
+      // カード2/3/4: 目標関連
+      renderTargetCards(latest.total);
 
       // ===== 資産推移グラフ =====
-      let activeMonths = 12;
       const chartCtx = document.getElementById('asset-chart').getContext('2d');
       let chart = null;
 
@@ -183,17 +212,44 @@
         for (const t of filtered) for (const k of Object.keys(t.byType)) types.add(k);
         const typeOrder = ['bank', 'jp_stock', 'foreign_stock', 'mutual_fund', 'insurance', 'pension', 'other'].filter(t => types.has(t));
 
-        const datasets = typeOrder.map(t => ({
+        // データラベルは点が多すぎると潰れるので、間引く
+        const labelStep = Math.max(1, Math.ceil(filtered.length / 12)); // 最大12個まで表示
+
+        const datasets = typeOrder.map((t, idx) => ({
           label: TYPE_LABELS[t] ?? t,
           data: filtered.map(d => d.byType[t] ?? 0),
-          backgroundColor: TYPE_COLORS[t],
+          backgroundColor: TYPE_COLORS[t] + 'cc',
           borderColor: TYPE_COLORS[t],
           borderWidth: 1,
           fill: true,
           tension: 0.2,
           pointRadius: 0,
           pointHoverRadius: 4,
+          datalabels: { display: false }, // 個別レイヤーには表示しない
         }));
+
+        // 「合計」線(透明、データラベル用)
+        datasets.push({
+          label: '合計',
+          data: filtered.map(d => d.total),
+          backgroundColor: 'transparent',
+          borderColor: 'transparent',
+          borderWidth: 0,
+          fill: false,
+          tension: 0,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          stack: 'total-line',
+          datalabels: {
+            display: (ctx) => ctx.dataIndex % labelStep === 0 || ctx.dataIndex === filtered.length - 1,
+            anchor: 'end',
+            align: 'top',
+            offset: 4,
+            color: '#111',
+            font: { size: 10, weight: '600' },
+            formatter: (v) => formatYenShort(v),
+          },
+        });
 
         if (chart) chart.destroy();
         chart = new Chart(chartCtx, {
@@ -206,16 +262,25 @@
             responsive: true,
             maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
+            layout: { padding: { top: 24 } },
             plugins: {
-              legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
+              legend: {
+                position: 'bottom',
+                labels: {
+                  boxWidth: 12, padding: 10,
+                  filter: (item) => item.text !== '合計', // 合計系列は凡例から隠す
+                },
+              },
               tooltip: {
                 callbacks: {
                   label: (ctx) => `${ctx.dataset.label}: ${formatYen(ctx.parsed.y)}`,
                   footer: (items) => {
-                    const total = items.reduce((sum, it) => sum + (it.parsed.y ?? 0), 0);
+                    // 合計系列を除外して合算
+                    const total = items.filter(it => it.dataset.label !== '合計').reduce((sum, it) => sum + (it.parsed.y ?? 0), 0);
                     return `合計: ${formatYen(total)}`;
                   },
                 },
+                filter: (ctx) => ctx.dataset.label !== '合計',
               },
             },
             scales: {
@@ -231,7 +296,7 @@
         document.getElementById('chart-period-label').textContent = months > 0 ? `直近${months}ヶ月` : '全期間';
       }
 
-      renderChart(activeMonths);
+      renderChart(12);
 
       // 期間切替
       document.querySelectorAll('.period-btn').forEach(btn => {
@@ -244,7 +309,7 @@
 
       // ===== 資産構成 (最新月) ドーナツ =====
       const compCtx = document.getElementById('composition-chart').getContext('2d');
-      const compTypes = Object.keys(latest.byType);
+      const compTypes = Object.keys(latest.byType).filter(t => latest.byType[t] > 0);
       new Chart(compCtx, {
         type: 'doughnut',
         data: {
@@ -252,6 +317,8 @@
           datasets: [{
             data: compTypes.map(t => latest.byType[t]),
             backgroundColor: compTypes.map(t => TYPE_COLORS[t] ?? '#999'),
+            borderWidth: 2,
+            borderColor: '#fff',
           }],
         },
         options: {
@@ -267,6 +334,19 @@
                   return `${ctx.label}: ${formatYen(ctx.parsed)} (${pct}%)`;
                 },
               },
+            },
+            datalabels: {
+              color: '#fff',
+              font: { size: 11, weight: '700' },
+              textShadowBlur: 4,
+              textShadowColor: 'rgba(0,0,0,0.5)',
+              formatter: (v, ctx) => {
+                const total = ctx.dataset.data.reduce((a,b) => a+b, 0);
+                const pct = total ? (v / total * 100) : 0;
+                if (pct < 4) return ''; // 4%未満はラベル省略
+                return `${formatYenShort(v)}\n${pct.toFixed(0)}%`;
+              },
+              textAlign: 'center',
             },
           },
         },

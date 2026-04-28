@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>月次入力 | 我が家マネー</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <main class="container">
+    <div id="loading" class="loading"><div class="spinner"></div><p>読み込み中...</p></div>
+    <div id="content" style="display:none;">
+      <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+        <h1 style="margin: 0; font-size: 1.5rem;">月次入力</h1>
+        <div style="display:flex; gap: 0.4rem; align-items: center;">
+          <button class="btn btn-ghost btn-sm" id="prev-month">‹ 前月</button>
+          <input type="month" id="target-month" class="form-input" style="width: 160px; min-height: 36px;">
+          <button class="btn btn-ghost btn-sm" id="next-month">次月 ›</button>
+        </div>
+      </div>
+
+      <div id="loading-month" style="text-align:center; padding: 1rem;">
+        <span class="spinner"></span> 既存データを読み込み中...
+      </div>
+
+      <div id="form-area" style="display:none;">
+        <!-- 資産残高 -->
+        <div class="card" style="margin-bottom: 1rem;">
+          <h3 style="margin: 0 0 0.5rem; font-size: 1.05rem;">資産残高 (月末)</h3>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+            登録済の口座だけ表示されます。<a href="/assets.html">資産画面</a>から口座を追加できます。
+          </p>
+          <div class="table-wrap" id="assets-table-wrap" style="display:none;">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>口座</th>
+                  <th class="num">残高 (円)</th>
+                </tr>
+              </thead>
+              <tbody id="assets-tbody"></tbody>
+            </table>
+          </div>
+          <div id="assets-empty" class="empty-state" style="padding: 1rem;">
+            <p style="margin: 0;">口座が未登録です</p>
+            <a href="/assets.html" class="btn btn-primary btn-sm" style="margin-top: 0.5rem;">口座を追加</a>
+          </div>
+        </div>
+
+        <!-- 収入 -->
+        <div class="card" style="margin-bottom: 1rem;">
+          <h3 style="margin: 0 0 0.5rem; font-size: 1.05rem;">収入</h3>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>カテゴリ</th>
+                  <th>名義</th>
+                  <th class="num">金額 (円)</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="income-tbody"></tbody>
+            </table>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" id="add-income-btn" style="margin-top: 0.5rem;">＋ 収入を追加</button>
+        </div>
+
+        <!-- 支出 -->
+        <div class="card" style="margin-bottom: 1rem;">
+          <h3 style="margin: 0 0 0.5rem; font-size: 1.05rem;">支出 (カテゴリ別の月合計)</h3>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>カテゴリ</th>
+                  <th class="num">金額 (円)</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="expense-tbody"></tbody>
+            </table>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" id="add-expense-btn" style="margin-top: 0.5rem;">＋ カテゴリを追加</button>
+        </div>
+
+        <!-- 保存 -->
+        <div style="display:flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap;">
+          <button type="button" class="btn btn-primary" id="save-all-btn">💾 この月をまとめて保存</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { requireAuth, supabase } from '/js/supabase.js';
+    import { renderNav } from '/js/nav.js';
+    import {
+      listAccounts, listSnapshots, upsertSnapshot,
+      listIncomes, replaceMonthlyIncomes,
+      listMonthlyTransactions, replaceMonthlyTransactions,
+      monthEndDate,
+    } from '/js/api.js';
+    import { formatYen, lastDayOfMonth, toast, withErrorToast } from '/js/utils.js';
+
+    const auth = await requireAuth();
+    if (!auth) throw new Error('not authenticated');
+    renderNav('/monthly.html');
+
+    // 世帯メンバー(名義人セレクト用)
+    const { data: members } = await supabase
+      .from('profiles')
+      .select('id, display_name')
+      .eq('household_id', auth.profile.household_id);
+
+    const DEFAULT_INCOME_CATEGORIES = ['給与', 'ボーナス', '副収入', 'その他'];
+    const DEFAULT_EXPENSE_CATEGORIES = ['食費','住居','水道光熱費','通信費','交通費','娯楽','日用品','医療費','衣服','教育','その他'];
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+    }
+
+    // =========== 月セレクター ===========
+    const monthInput = document.getElementById('target-month');
+    const now = new Date();
+    monthInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+    document.getElementById('prev-month').addEventListener('click', () => {
+      const [y, m] = monthInput.value.split('-').map(Number);
+      const d = new Date(y, m - 2, 1);
+      monthInput.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      loadMonth();
+    });
+    document.getElementById('next-month').addEventListener('click', () => {
+      const [y, m] = monthInput.value.split('-').map(Number);
+      const d = new Date(y, m, 1);
+      monthInput.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      loadMonth();
+    });
+    monthInput.addEventListener('change', loadMonth);
+
+    // =========== ロード処理 ===========
+    let accountsCache = [];
+
+    async function loadMonth() {
+      document.getElementById('form-area').style.display = 'none';
+      document.getElementById('loading-month').style.display = 'block';
+
+      const [y, m] = monthInput.value.split('-').map(Number);
+      const dateStr = monthEndDate(y, m);
+
+      // 資産: 全ての口座 + その月の既存スナップショット
+      accountsCache = await listAccounts({ includeInactive: false });
+      const snaps = await listSnapshots({ fromDate: dateStr, toDate: dateStr });
+      const snapByAcc = new Map(snaps.map(s => [s.account_id, s]));
+
+      const aTbody = document.getElementById('assets-tbody');
+      aTbody.innerHTML = '';
+      if (accountsCache.length === 0) {
+        document.getElementById('assets-table-wrap').style.display = 'none';
+        document.getElementById('assets-empty').style.display = 'block';
+      } else {
+        document.getElementById('assets-table-wrap').style.display = 'block';
+        document.getElementById('assets-empty').style.display = 'none';
+        for (const acc of accountsCache) {
+          const ex = snapByAcc.get(acc.id);
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>
+              <div style="font-weight:500;">${escapeHtml(acc.name)}</div>
+            </td>
+            <td class="num">
+              <input type="number" inputmode="numeric" class="form-input asset-input" data-account-id="${acc.id}"
+                style="text-align:right; max-width: 200px;"
+                value="${ex ? Math.round(Number(ex.balance)) : ''}" placeholder="0">
+            </td>
+          `;
+          aTbody.appendChild(tr);
+        }
+      }
+
+      // 収入
+      const incomes = await listIncomes({ fromDate: dateStr, toDate: dateStr });
+      const incomeTbody = document.getElementById('income-tbody');
+      incomeTbody.innerHTML = '';
+      if (incomes.length === 0) {
+        // デフォルトのテンプレートを表示 (給与×名義人ごと)
+        for (const member of members ?? []) {
+          addIncomeRow({ category: '給与', earner_profile_id: member.id, amount: '' });
+        }
+        if ((members ?? []).length === 0) addIncomeRow({ category: '給与', amount: '' });
+      } else {
+        for (const inc of incomes) addIncomeRow(inc);
+      }
+
+      // 支出
+      const txs = await listMonthlyTransactions({ fromDate: dateStr, toDate: dateStr });
+      const expenseTbody = document.getElementById('expense-tbody');
+      expenseTbody.innerHTML = '';
+      if (txs.length === 0) {
+        for (const cat of DEFAULT_EXPENSE_CATEGORIES) addExpenseRow({ category: cat, amount: '' });
+      } else {
+        const existing = new Set(txs.map(t => t.category));
+        for (const tx of txs) addExpenseRow(tx);
+        // 既存にないデフォルトも下に追加
+        for (const cat of DEFAULT_EXPENSE_CATEGORIES) {
+          if (!existing.has(cat)) addExpenseRow({ category: cat, amount: '' });
+        }
+      }
+
+      document.getElementById('loading-month').style.display = 'none';
+      document.getElementById('form-area').style.display = 'block';
+    }
+
+    // =========== 行の追加・削除 ===========
+    function addIncomeRow({ category, earner_profile_id, amount, note }) {
+      const tr = document.createElement('tr');
+      tr.classList.add('income-row');
+      tr.innerHTML = `
+        <td>
+          <select class="form-select inc-cat" style="min-width: 120px;">
+            ${DEFAULT_INCOME_CATEGORIES.map(c => `<option value="${escapeHtml(c)}"${c===category?' selected':''}>${escapeHtml(c)}</option>`).join('')}
+          </select>
+        </td>
+        <td>
+          <select class="form-select inc-earner" style="min-width: 120px;">
+            <option value="">(共有)</option>
+            ${(members ?? []).map(m => `<option value="${m.id}"${m.id===earner_profile_id?' selected':''}>${escapeHtml(m.display_name)}</option>`).join('')}
+          </select>
+        </td>
+        <td class="num"><input type="number" inputmode="numeric" class="form-input inc-amount" style="text-align:right; max-width: 200px;" value="${amount ?? ''}" placeholder="0"></td>
+        <td><button type="button" class="btn btn-ghost btn-sm row-del">✕</button></td>
+      `;
+      tr.querySelector('.row-del').addEventListener('click', () => tr.remove());
+      document.getElementById('income-tbody').appendChild(tr);
+    }
+
+    function addExpenseRow({ category, amount }) {
+      const tr = document.createElement('tr');
+      tr.classList.add('expense-row');
+      tr.innerHTML = `
+        <td><input type="text" class="form-input exp-cat" value="${escapeHtml(category ?? '')}" placeholder="カテゴリ名" maxlength="20"></td>
+        <td class="num"><input type="number" inputmode="numeric" class="form-input exp-amount" style="text-align:right; max-width: 200px;" value="${amount ?? ''}" placeholder="0"></td>
+        <td><button type="button" class="btn btn-ghost btn-sm row-del">✕</button></td>
+      `;
+      tr.querySelector('.row-del').addEventListener('click', () => tr.remove());
+      document.getElementById('expense-tbody').appendChild(tr);
+    }
+
+    document.getElementById('add-income-btn').addEventListener('click', () => addIncomeRow({ category: '給与', amount: '' }));
+    document.getElementById('add-expense-btn').addEventListener('click', () => addExpenseRow({ category: '', amount: '' }));
+
+    // =========== 保存 ===========
+    document.getElementById('save-all-btn').addEventListener('click', withErrorToast(async () => {
+      const [y, m] = monthInput.value.split('-').map(Number);
+      const dateStr = monthEndDate(y, m);
+
+      const btn = document.getElementById('save-all-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> 保存中...';
+
+      try {
+        // 1. 資産
+        const assetInputs = document.querySelectorAll('.asset-input');
+        let assetSaved = 0;
+        for (const inp of assetInputs) {
+          const v = inp.value.trim();
+          if (!v) continue;
+          const balance = parseInt(v, 10);
+          if (isNaN(balance)) continue;
+          await upsertSnapshot({
+            account_id: inp.dataset.accountId,
+            snapshot_date: dateStr,
+            balance,
+            source: 'manual',
+          });
+          assetSaved++;
+        }
+
+        // 2. 収入 (delete-then-insert)
+        const incomeRows = [];
+        document.querySelectorAll('.income-row').forEach(tr => {
+          const category = tr.querySelector('.inc-cat').value;
+          const earner = tr.querySelector('.inc-earner').value || null;
+          const amountStr = tr.querySelector('.inc-amount').value.trim();
+          if (!amountStr) return;
+          const amount = parseInt(amountStr, 10);
+          if (isNaN(amount) || amount <= 0) return;
+          incomeRows.push({ earner_profile_id: earner, amount, category });
+        });
+        await replaceMonthlyIncomes({ year: y, month: m, rows: incomeRows });
+
+        // 3. 支出 (delete-then-insert, monthly_manual)
+        const expenseRows = [];
+        const seenCats = new Set();
+        document.querySelectorAll('.expense-row').forEach(tr => {
+          const category = tr.querySelector('.exp-cat').value.trim();
+          const amountStr = tr.querySelector('.exp-amount').value.trim();
+          if (!category || !amountStr) return;
+          const amount = parseInt(amountStr, 10);
+          if (isNaN(amount) || amount <= 0) return;
+          if (seenCats.has(category)) return; // 重複カテゴリは最初の1つだけ
+          seenCats.add(category);
+          expenseRows.push({ category, amount });
+        });
+        await replaceMonthlyTransactions({ year: y, month: m, rows: expenseRows });
+
+        toast(`資産${assetSaved}件 / 収入${incomeRows.length}件 / 支出${expenseRows.length}件 を保存しました`, 'success');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '💾 この月をまとめて保存';
+      }
+    }));
+
+    // 初回ロード
+    await loadMonth();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+  </script>
+</body>
+</html>

@@ -29,7 +29,7 @@ export async function getMyProfile() {
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, display_name, household_id, households(id, name, invite_code)')
+    .select('id, display_name, household_id, households(id, name, invite_code, target_total_amount)')
     .eq('id', user.id)
     .maybeSingle();
 

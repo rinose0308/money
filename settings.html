@@ -12,6 +12,7 @@
     <div id="content" style="display:none;">
       <h1 style="margin: 0 0 1rem; font-size: 1.5rem;">設定</h1>
 
+      <!-- 世帯情報 -->
       <div class="card" style="margin-bottom: 1rem;">
         <h3 style="margin: 0 0 0.75rem; font-size: 1rem;">世帯情報</h3>
         <div style="display: grid; gap: 0.5rem; font-size: 0.95rem;">
@@ -20,7 +21,7 @@
           <div>
             <span style="color: var(--text-muted);">招待コード: </span>
             <strong id="hh-invite-code" style="font-family: monospace; letter-spacing: 0.1em; background: var(--bg); padding: 0.2rem 0.5rem; border-radius: 0.3rem;">—</strong>
-            <button id="copy-code-btn" class="btn btn-ghost" style="padding: 0.3rem 0.6rem; font-size: 0.85rem; min-height: auto; margin-left: 0.5rem;">コピー</button>
+            <button id="copy-code-btn" class="btn btn-ghost btn-sm" style="margin-left: 0.5rem;">コピー</button>
           </div>
         </div>
         <p class="form-help" style="margin-top: 0.75rem;">
@@ -28,9 +29,26 @@
         </p>
       </div>
 
+      <!-- 目標金額 -->
+      <div class="card" style="margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">目標金額</h3>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+          総資産の目標額を設定すると、ダッシュボードに目標までの残額と達成率が表示されます。
+        </p>
+        <form id="target-form" style="display:flex; gap:0.5rem; align-items: flex-end; flex-wrap: wrap;">
+          <div class="form-group" style="margin: 0; flex: 1; min-width: 200px;">
+            <label class="form-label" for="target-amount">目標額 (円)</label>
+            <input type="number" id="target-amount" class="form-input" inputmode="numeric" placeholder="例: 50000000" min="0" step="100000">
+            <p class="form-help" id="target-helper">—</p>
+          </div>
+          <button type="submit" class="btn btn-primary" id="target-save">保存</button>
+        </form>
+      </div>
+
+      <!-- 今後の機能 -->
       <div class="card empty-state">
-        <h3>カテゴリ管理・自動分類ルール・目標設定</h3>
-        <p>Phase 5 で実装予定</p>
+        <h3>カテゴリ管理・自動分類ルール</h3>
+        <p>Phase 4 / 5 で実装予定</p>
       </div>
     </div>
   </main>
@@ -38,7 +56,8 @@
   <script type="module">
     import { requireAuth } from '/js/supabase.js';
     import { renderNav } from '/js/nav.js';
-    import { toast } from '/js/utils.js';
+    import { updateHousehold } from '/js/api.js';
+    import { toast, withErrorToast, formatYen, formatYenShort } from '/js/utils.js';
 
     const auth = await requireAuth();
     if (!auth) throw new Error('not authenticated');
@@ -56,6 +75,45 @@
         toast('コピーに失敗しました', 'error');
       }
     });
+
+    // 目標額: 既存値を反映
+    const targetInput = document.getElementById('target-amount');
+    const targetHelper = document.getElementById('target-helper');
+    const currentTarget = auth.profile.households.target_total_amount;
+    if (currentTarget != null) {
+      targetInput.value = currentTarget;
+      targetHelper.textContent = `現在の設定: ${formatYen(currentTarget)} (${formatYenShort(currentTarget)})`;
+    } else {
+      targetHelper.textContent = '未設定';
+    }
+    targetInput.addEventListener('input', () => {
+      const v = parseInt(targetInput.value, 10);
+      targetHelper.textContent = isNaN(v) ? '未設定' : `${formatYen(v)} (${formatYenShort(v)})`;
+    });
+
+    // 保存
+    document.getElementById('target-form').addEventListener('submit', withErrorToast(async (e) => {
+      e.preventDefault();
+      const raw = targetInput.value.trim();
+      const amount = raw === '' ? null : parseInt(raw, 10);
+      if (raw !== '' && (isNaN(amount) || amount < 0)) {
+        toast('正しい金額を入力してください', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('target-save');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> 保存中...';
+
+      await updateHousehold({
+        householdId: auth.profile.household_id,
+        updates: { target_total_amount: amount },
+      });
+
+      btn.disabled = false;
+      btn.textContent = '保存';
+      toast('目標額を保存しました', 'success');
+    }));
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
