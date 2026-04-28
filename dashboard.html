@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>ダッシュボード | 我が家マネー</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <main class="container">
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <p>読み込み中...</p>
+    </div>
+
+    <div id="content" style="display:none;">
+      <h1 style="margin: 0 0 0.5rem; font-size: 1.5rem;">ダッシュボード</h1>
+      <p style="color: var(--text-muted); margin: 0 0 1.5rem; font-size: 0.9rem;">
+        <span id="household-greeting"></span>
+      </p>
+
+      <!-- メトリクスカード4枚 -->
+      <div class="grid cols-4">
+        <div class="card">
+          <p class="card-title">総資産</p>
+          <p class="card-value" id="metric-total">¥—</p>
+          <p class="card-sub" id="metric-total-sub">前月比 —</p>
+        </div>
+        <div class="card">
+          <p class="card-title">最終更新</p>
+          <p class="card-value" id="metric-latest" style="font-size: 1.25rem;">—</p>
+          <p class="card-sub" id="metric-latest-sub">—</p>
+        </div>
+        <div class="card">
+          <p class="card-title">対象口座数</p>
+          <p class="card-value" id="metric-accounts">—</p>
+          <p class="card-sub" id="metric-accounts-sub">—</p>
+        </div>
+        <div class="card">
+          <p class="card-title">記録月数</p>
+          <p class="card-value" id="metric-months">—</p>
+          <p class="card-sub" id="metric-months-sub">—</p>
+        </div>
+      </div>
+
+      <!-- 資産推移グラフ -->
+      <h2 class="section-title">資産推移</h2>
+      <div class="card">
+        <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div style="font-size: 0.9rem; color: var(--text-muted);" id="chart-period-label">直近12ヶ月</div>
+          <div style="display:flex; gap: 0.3rem;">
+            <button class="btn btn-ghost btn-sm period-btn" data-months="6">6ヶ月</button>
+            <button class="btn btn-ghost btn-sm period-btn active" data-months="12">1年</button>
+            <button class="btn btn-ghost btn-sm period-btn" data-months="36">3年</button>
+            <button class="btn btn-ghost btn-sm period-btn" data-months="0">全期間</button>
+          </div>
+        </div>
+        <div class="chart-container">
+          <canvas id="asset-chart"></canvas>
+        </div>
+        <div id="asset-empty" class="empty-state" style="display:none;">
+          <h3>まだ資産データがありません</h3>
+          <p>過去のCSVを取り込むか、最初の残高を入力してみましょう</p>
+          <div style="display:flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
+            <a href="/import.html" class="btn btn-primary">CSVを取り込む</a>
+            <a href="/assets.html" class="btn btn-ghost">残高を入力</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- サブカード -->
+      <div class="grid cols-2" style="margin-top: 1rem;">
+        <div class="card">
+          <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">資産構成 (最新月)</h3>
+          <div class="chart-container" style="height: 280px;">
+            <canvas id="composition-chart"></canvas>
+          </div>
+          <div id="composition-empty" class="empty-state" style="display:none; padding: 2rem 1rem;">
+            <p>データが入ると表示されます</p>
+          </div>
+        </div>
+        <div class="card">
+          <h3 style="margin: 0 0 0.75rem; font-size: 1rem;">前年同月比</h3>
+          <div id="yoy-comparison">
+            <p style="color: var(--text-muted); padding: 2rem 1rem; text-align:center; margin:0;">データが揃ったら表示されます</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { requireAuth } from '/js/supabase.js';
+    import { renderNav } from '/js/nav.js';
+    import { listAccounts, getAssetTrend } from '/js/api.js';
+    import { formatYen, formatYenShort, formatPercent } from '/js/utils.js';
+
+    const auth = await requireAuth();
+    if (!auth) throw new Error('not authenticated');
+    renderNav('/dashboard.html');
+
+    document.getElementById('household-greeting').textContent =
+      `${auth.profile.households.name} / ${auth.profile.display_name}さん`;
+
+    const TYPE_LABELS = {
+      bank: '預貯金', jp_stock: '日本株', foreign_stock: '外国株',
+      mutual_fund: '投資信託', insurance: '保険', pension: '年金/共済', other: 'その他',
+    };
+    const TYPE_COLORS = {
+      bank: '#3b82f6', jp_stock: '#ef4444', foreign_stock: '#f59e0b',
+      mutual_fund: '#8b5cf6', insurance: '#10b981', pension: '#6366f1', other: '#94a3b8',
+    };
+
+    // データ取得
+    const [accounts, trend] = await Promise.all([
+      listAccounts({ includeInactive: true }),
+      getAssetTrend(),
+    ]);
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+
+    if (trend.length === 0) {
+      // データなし状態
+      document.getElementById('metric-total').textContent = '¥0';
+      document.getElementById('metric-total-sub').textContent = 'データを取り込みましょう';
+      document.getElementById('metric-latest').textContent = '—';
+      document.getElementById('metric-latest-sub').textContent = 'データなし';
+      document.getElementById('metric-accounts').textContent = String(accounts.length);
+      document.getElementById('metric-accounts-sub').textContent = '残高データ未登録';
+      document.getElementById('metric-months').textContent = '0';
+      document.getElementById('metric-months-sub').textContent = 'データなし';
+      document.getElementById('asset-empty').style.display = 'block';
+      document.querySelector('#asset-chart').style.display = 'none';
+      document.getElementById('composition-empty').style.display = 'block';
+      document.querySelector('#composition-chart').style.display = 'none';
+    } else {
+      // メトリクス計算
+      const latest = trend[trend.length - 1];
+      const prev = trend.length >= 2 ? trend[trend.length - 2] : null;
+      const yearAgo = trend.find(t => {
+        const latestDate = new Date(latest.date);
+        const target = new Date(latestDate.getFullYear() - 1, latestDate.getMonth(), latestDate.getDate());
+        return t.date === target.toISOString().slice(0, 10);
+      });
+
+      // カード1: 総資産
+      document.getElementById('metric-total').textContent = formatYen(latest.total);
+      if (prev) {
+        const diff = latest.total - prev.total;
+        const pct = prev.total !== 0 ? (diff / prev.total) * 100 : 0;
+        const sub = document.getElementById('metric-total-sub');
+        sub.textContent = `前月比 ${diff >= 0 ? '+' : ''}${formatYenShort(diff)} (${formatPercent(pct)})`;
+        sub.classList.add(diff >= 0 ? 'up' : 'down');
+      } else {
+        document.getElementById('metric-total-sub').textContent = '前月データなし';
+      }
+
+      // カード2: 最終更新
+      document.getElementById('metric-latest').textContent = latest.date;
+      const accountsWithLatest = Object.keys(latest.byAccount).length;
+      document.getElementById('metric-latest-sub').textContent = `${accountsWithLatest}口座を記録`;
+
+      // カード3: 対象口座数
+      document.getElementById('metric-accounts').textContent = String(accounts.filter(a => a.is_active).length);
+      document.getElementById('metric-accounts-sub').textContent = `(全${accounts.length}口座中)`;
+
+      // カード4: 記録月数
+      document.getElementById('metric-months').textContent = String(trend.length);
+      document.getElementById('metric-months-sub').textContent = `${trend[0].date} 〜`;
+
+      // ===== 資産推移グラフ =====
+      let activeMonths = 12;
+      const chartCtx = document.getElementById('asset-chart').getContext('2d');
+      let chart = null;
+
+      function renderChart(months) {
+        const filtered = months > 0 ? trend.slice(-months) : trend;
+
+        // 系列: account_type ごとのスタック
+        const types = new Set();
+        for (const t of filtered) for (const k of Object.keys(t.byType)) types.add(k);
+        const typeOrder = ['bank', 'jp_stock', 'foreign_stock', 'mutual_fund', 'insurance', 'pension', 'other'].filter(t => types.has(t));
+
+        const datasets = typeOrder.map(t => ({
+          label: TYPE_LABELS[t] ?? t,
+          data: filtered.map(d => d.byType[t] ?? 0),
+          backgroundColor: TYPE_COLORS[t],
+          borderColor: TYPE_COLORS[t],
+          borderWidth: 1,
+          fill: true,
+          tension: 0.2,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+        }));
+
+        if (chart) chart.destroy();
+        chart = new Chart(chartCtx, {
+          type: 'line',
+          data: {
+            labels: filtered.map(d => d.date.slice(0, 7)),
+            datasets,
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => `${ctx.dataset.label}: ${formatYen(ctx.parsed.y)}`,
+                  footer: (items) => {
+                    const total = items.reduce((sum, it) => sum + (it.parsed.y ?? 0), 0);
+                    return `合計: ${formatYen(total)}`;
+                  },
+                },
+              },
+            },
+            scales: {
+              y: {
+                stacked: true,
+                ticks: { callback: (v) => formatYenShort(v) },
+              },
+              x: { stacked: true },
+            },
+          },
+        });
+
+        document.getElementById('chart-period-label').textContent = months > 0 ? `直近${months}ヶ月` : '全期間';
+      }
+
+      renderChart(activeMonths);
+
+      // 期間切替
+      document.querySelectorAll('.period-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          renderChart(parseInt(btn.dataset.months, 10));
+        });
+      });
+
+      // ===== 資産構成 (最新月) ドーナツ =====
+      const compCtx = document.getElementById('composition-chart').getContext('2d');
+      const compTypes = Object.keys(latest.byType);
+      new Chart(compCtx, {
+        type: 'doughnut',
+        data: {
+          labels: compTypes.map(t => TYPE_LABELS[t] ?? t),
+          datasets: [{
+            data: compTypes.map(t => latest.byType[t]),
+            backgroundColor: compTypes.map(t => TYPE_COLORS[t] ?? '#999'),
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'right', labels: { boxWidth: 12, padding: 8, font: { size: 12 } } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  const total = ctx.dataset.data.reduce((a,b) => a+b, 0);
+                  const pct = total ? (ctx.parsed / total * 100).toFixed(1) : 0;
+                  return `${ctx.label}: ${formatYen(ctx.parsed)} (${pct}%)`;
+                },
+              },
+            },
+          },
+        },
+      });
+
+      // ===== 前年同月比 =====
+      if (yearAgo) {
+        const yoyDiff = latest.total - yearAgo.total;
+        const yoyPct = yearAgo.total !== 0 ? (yoyDiff / yearAgo.total) * 100 : 0;
+        document.getElementById('yoy-comparison').innerHTML = `
+          <div style="display: grid; gap: 0.5rem;">
+            <div style="display:flex; justify-content: space-between;">
+              <span style="color: var(--text-muted);">${yearAgo.date}</span>
+              <span style="font-variant-numeric: tabular-nums;">${formatYen(yearAgo.total)}</span>
+            </div>
+            <div style="display:flex; justify-content: space-between;">
+              <span style="color: var(--text-muted);">${latest.date}</span>
+              <span style="font-variant-numeric: tabular-nums; font-weight:600;">${formatYen(latest.total)}</span>
+            </div>
+            <hr style="border:none; border-top:1px solid var(--border); margin: 0.5rem 0;">
+            <div style="display:flex; justify-content: space-between;">
+              <span>差額</span>
+              <span class="${yoyDiff >= 0 ? 'card-sub up' : 'card-sub down'}" style="font-weight:600; font-variant-numeric: tabular-nums;">
+                ${yoyDiff >= 0 ? '+' : ''}${formatYen(yoyDiff)} (${formatPercent(yoyPct)})
+              </span>
+            </div>
+          </div>
+        `;
+      }
+    }
+  </script>
+</body>
+</html>

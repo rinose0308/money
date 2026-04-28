@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>設定 | 我が家マネー</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <main class="container">
+    <div id="loading" class="loading"><div class="spinner"></div><p>読み込み中...</p></div>
+    <div id="content" style="display:none;">
+      <h1 style="margin: 0 0 1rem; font-size: 1.5rem;">設定</h1>
+
+      <div class="card" style="margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 0.75rem; font-size: 1rem;">世帯情報</h3>
+        <div style="display: grid; gap: 0.5rem; font-size: 0.95rem;">
+          <div><span style="color: var(--text-muted);">世帯名: </span><strong id="hh-name">—</strong></div>
+          <div><span style="color: var(--text-muted);">表示名: </span><strong id="hh-display-name">—</strong></div>
+          <div>
+            <span style="color: var(--text-muted);">招待コード: </span>
+            <strong id="hh-invite-code" style="font-family: monospace; letter-spacing: 0.1em; background: var(--bg); padding: 0.2rem 0.5rem; border-radius: 0.3rem;">—</strong>
+            <button id="copy-code-btn" class="btn btn-ghost" style="padding: 0.3rem 0.6rem; font-size: 0.85rem; min-height: auto; margin-left: 0.5rem;">コピー</button>
+          </div>
+        </div>
+        <p class="form-help" style="margin-top: 0.75rem;">
+          配偶者にこの招待コードを伝えれば、同じ世帯のデータを共有できます。
+        </p>
+      </div>
+
+      <div class="card empty-state">
+        <h3>カテゴリ管理・自動分類ルール・目標設定</h3>
+        <p>Phase 5 で実装予定</p>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { requireAuth } from '/js/supabase.js';
+    import { renderNav } from '/js/nav.js';
+    import { toast } from '/js/utils.js';
+
+    const auth = await requireAuth();
+    if (!auth) throw new Error('not authenticated');
+    renderNav('/settings.html');
+
+    document.getElementById('hh-name').textContent = auth.profile.households.name;
+    document.getElementById('hh-display-name').textContent = auth.profile.display_name;
+    document.getElementById('hh-invite-code').textContent = auth.profile.households.invite_code;
+
+    document.getElementById('copy-code-btn').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(auth.profile.households.invite_code);
+        toast('コピーしました', 'success');
+      } catch {
+        toast('コピーに失敗しました', 'error');
+      }
+    });
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+  </script>
+</body>
+</html>

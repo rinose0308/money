@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>取り込み | 我が家マネー</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <main class="container">
+    <div id="loading" class="loading"><div class="spinner"></div><p>読み込み中...</p></div>
+    <div id="content" style="display:none;">
+      <h1 style="margin: 0 0 1rem; font-size: 1.5rem;">データ取り込み</h1>
+
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="legacy">過去データ (我が家マネーCSV)</button>
+        <button class="tab-btn" data-tab="csv">支出CSV</button>
+        <button class="tab-btn" data-tab="manual">手入力</button>
+      </div>
+
+      <!-- タブ1: 過去CSV -->
+      <div class="tab-pane" id="tab-legacy">
+        <div class="card">
+          <h2 style="margin: 0 0 0.5rem; font-size: 1.1rem;">我が家マネー - シート1.csv の取り込み</h2>
+          <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0 0 1rem;">
+            Google スプレッドシートから「ファイル → ダウンロード → カンマ区切り (.csv)」で取得したCSVを取り込みます。<br>
+            各列を口座にマッピングしてから一括登録します。
+          </p>
+
+          <div id="step1-upload">
+            <div class="dropzone" id="dropzone">
+              <p style="font-size: 2rem; margin: 0;">📂</p>
+              <p>ここにCSVファイルをドロップ、または</p>
+              <p><label class="btn btn-primary"><input type="file" id="csv-input" accept=".csv,text/csv" style="display:none;">ファイルを選択</label></p>
+            </div>
+          </div>
+
+          <div id="step2-preview" style="display:none;">
+            <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem;">プレビュー</h3>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0 0 0.75rem;">
+              <span id="preview-summary"></span>
+            </p>
+
+            <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem;">列のマッピング</h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+              各列を「どの口座として登録するか」を確認してください。チェックを外すとその列はインポートされません。
+            </p>
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width:60px;">取込</th>
+                    <th>CSVの列名</th>
+                    <th>登録する口座名</th>
+                    <th>種別</th>
+                  </tr>
+                </thead>
+                <tbody id="mapping-tbody"></tbody>
+              </table>
+            </div>
+
+            <div class="modal-actions">
+              <button type="button" class="btn btn-ghost" id="cancel-btn">キャンセル</button>
+              <button type="button" class="btn btn-primary" id="import-btn">この内容で取り込む</button>
+            </div>
+          </div>
+
+          <div id="step3-progress" style="display:none;">
+            <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem;">取り込み中...</h3>
+            <div class="progress" style="margin-bottom: 0.5rem;">
+              <div class="progress-bar" id="progress-bar" style="width: 0%;"></div>
+            </div>
+            <p id="progress-text" style="color: var(--text-muted); font-size: 0.9rem;">準備中...</p>
+          </div>
+
+          <div id="step4-done" style="display:none;">
+            <div class="empty-state">
+              <h3>✅ 取り込みが完了しました</h3>
+              <p id="done-summary"></p>
+              <div style="display:flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
+                <a href="/dashboard.html" class="btn btn-primary">ダッシュボードを見る</a>
+                <a href="/assets.html" class="btn btn-ghost">資産画面を見る</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- タブ2: 支出CSV (Phase 4) -->
+      <div class="tab-pane" id="tab-csv" style="display:none;">
+        <div class="card empty-state">
+          <h3>Phase 4 で実装予定</h3>
+          <p>マネーフォワード/楽天カード等のCSV取り込みはPhase 4で実装します。</p>
+        </div>
+      </div>
+
+      <!-- タブ3: 手入力 (Phase 4) -->
+      <div class="tab-pane" id="tab-manual" style="display:none;">
+        <div class="card empty-state">
+          <h3>Phase 4 で実装予定</h3>
+          <p>単発の支出/収入入力はPhase 4で実装します。</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { requireAuth } from '/js/supabase.js';
+    import { renderNav } from '/js/nav.js';
+    import { listAccounts, createAccount, bulkUpsertSnapshots } from '/js/api.js';
+    import { parseLegacyCsv } from '/js/legacy-csv.js';
+    import { toast, withErrorToast } from '/js/utils.js';
+
+    const auth = await requireAuth();
+    if (!auth) throw new Error('not authenticated');
+    renderNav('/import.html');
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+
+    // タブ切替
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+        document.getElementById(`tab-${b.dataset.tab}`).style.display = 'block';
+      });
+    });
+
+    // ============ Drag & Drop / File input ============
+    const dropzone = document.getElementById('dropzone');
+    const csvInput = document.getElementById('csv-input');
+
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file) handleFile(file);
+    });
+    csvInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) handleFile(file);
+    });
+
+    let parsedRecords = null;
+    let detectedColumns = null;
+
+    async function handleFile(file) {
+      try {
+        if (!file.name.toLowerCase().endsWith('.csv')) {
+          toast('CSVファイルを選択してください', 'error');
+          return;
+        }
+        const text = await readFileAsText(file);
+        const result = parseLegacyCsv(text);
+        parsedRecords = result.records;
+        detectedColumns = result.detectedColumns;
+
+        if (parsedRecords.length === 0) {
+          toast('有効なデータ行が見つかりませんでした', 'error');
+          return;
+        }
+        if (detectedColumns.length === 0) {
+          toast('既知の列名が見つかりませんでした', 'error');
+          return;
+        }
+
+        // プレビュー表示
+        const dates = parsedRecords.map(r => r.snapshotDate);
+        const minDate = dates[0];
+        const maxDate = dates[dates.length - 1];
+        document.getElementById('preview-summary').innerHTML =
+          `<strong>${parsedRecords.length}</strong>ヶ月分のデータを検出 (${minDate} 〜 ${maxDate})、 <strong>${detectedColumns.length}</strong>列の口座候補`;
+
+        const tbody = document.getElementById('mapping-tbody');
+        tbody.innerHTML = '';
+        for (const col of detectedColumns) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td><input type="checkbox" class="col-import" data-source="${col.sourceColumn}" checked></td>
+            <td><strong>${escapeHtml(col.sourceColumn)}</strong></td>
+            <td><input type="text" class="form-input col-name" data-source="${col.sourceColumn}" value="${escapeHtml(col.defaultName)}" maxlength="50"></td>
+            <td>
+              <select class="form-select col-type" data-source="${col.sourceColumn}">
+                <option value="bank"${col.defaultType==='bank'?' selected':''}>預貯金</option>
+                <option value="jp_stock"${col.defaultType==='jp_stock'?' selected':''}>日本株</option>
+                <option value="foreign_stock"${col.defaultType==='foreign_stock'?' selected':''}>外国株</option>
+                <option value="mutual_fund"${col.defaultType==='mutual_fund'?' selected':''}>投資信託</option>
+                <option value="insurance"${col.defaultType==='insurance'?' selected':''}>保険</option>
+                <option value="pension"${col.defaultType==='pension'?' selected':''}>年金/共済</option>
+                <option value="other"${col.defaultType==='other'?' selected':''}>その他</option>
+              </select>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        }
+
+        document.getElementById('step1-upload').style.display = 'none';
+        document.getElementById('step2-preview').style.display = 'block';
+      } catch (err) {
+        console.error(err);
+        toast(err.message ?? 'CSVの読み込みに失敗しました', 'error');
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+    }
+
+    async function readFileAsText(file) {
+      // CP932/Shift_JIS 対応のため、まずUTF-8で読み、文字化けしてたらSJISでリトライ
+      const utf8 = await file.text();
+      // 文字化け検知: 「�」が含まれる、または「貯」などの基本日本語が見つからない場合
+      const looksOk = /[預貯金保険株]/.test(utf8) || /[ぁ-ん]/.test(utf8);
+      if (looksOk) return utf8;
+
+      // SJISでリトライ
+      try {
+        const buf = await file.arrayBuffer();
+        const dec = new TextDecoder('shift_jis');
+        return dec.decode(buf);
+      } catch {
+        return utf8;
+      }
+    }
+
+    document.getElementById('cancel-btn').addEventListener('click', () => {
+      parsedRecords = null;
+      detectedColumns = null;
+      document.getElementById('step1-upload').style.display = 'block';
+      document.getElementById('step2-preview').style.display = 'none';
+      csvInput.value = '';
+    });
+
+    // ============ Import 実行 ============
+    document.getElementById('import-btn').addEventListener('click', withErrorToast(async () => {
+      const importMap = []; // [{ source, name, type }]
+      document.querySelectorAll('.col-import:checked').forEach(cb => {
+        const source = cb.dataset.source;
+        const name = document.querySelector(`.col-name[data-source="${source}"]`).value.trim();
+        const type = document.querySelector(`.col-type[data-source="${source}"]`).value;
+        if (name) importMap.push({ source, name, type });
+      });
+
+      if (importMap.length === 0) {
+        toast('取り込む列を1つ以上選んでください', 'warn');
+        return;
+      }
+
+      document.getElementById('step2-preview').style.display = 'none';
+      document.getElementById('step3-progress').style.display = 'block';
+      const bar = document.getElementById('progress-bar');
+      const ptext = document.getElementById('progress-text');
+
+      // 既存口座 (取り込み済み列を再利用するため)
+      const existing = await listAccounts({ includeInactive: true });
+      const existingByName = new Map(existing.map(a => [a.name, a]));
+
+      // 1. 口座を作成 (既存があれば再利用)
+      ptext.textContent = '口座マスタを準備中...';
+      const sourceToAccountId = {};
+      let i = 0;
+      for (const m of importMap) {
+        i++;
+        bar.style.width = `${(i / (importMap.length + 1)) * 30}%`;
+        ptext.textContent = `口座マスタを作成中: ${m.name}`;
+        let acc = existingByName.get(m.name);
+        if (!acc) {
+          acc = await createAccount({ name: m.name, account_type: m.type });
+          existingByName.set(m.name, acc);
+        } else if (acc.account_type !== m.type) {
+          // 種別が違ったら更新は今回はせず既存優先
+        }
+        sourceToAccountId[m.source] = acc.id;
+      }
+
+      // 2. snapshots を組み立てて bulk upsert (重複は last-wins で排除)
+      ptext.textContent = 'スナップショットを準備中...';
+      bar.style.width = '40%';
+      const dedupe = new Map();
+      for (const r of parsedRecords) {
+        for (const m of importMap) {
+          const v = r.columns[m.source];
+          if (v == null) continue;
+          const accountId = sourceToAccountId[m.source];
+          const key = `${accountId}|${r.snapshotDate}`;
+          dedupe.set(key, {
+            account_id: accountId,
+            snapshot_date: r.snapshotDate,
+            balance: v,
+            source: 'csv',
+          });
+        }
+      }
+      const snapshotsToInsert = Array.from(dedupe.values());
+
+      ptext.textContent = `${snapshotsToInsert.length}件のスナップショットを保存中...`;
+      bar.style.width = '60%';
+
+      await bulkUpsertSnapshots(snapshotsToInsert);
+
+      bar.style.width = '100%';
+      ptext.textContent = '完了';
+
+      document.getElementById('step3-progress').style.display = 'none';
+      document.getElementById('step4-done').style.display = 'block';
+      document.getElementById('done-summary').textContent =
+        `${importMap.length}口座、${snapshotsToInsert.length}件のスナップショットを取り込みました`;
+    }));
+  </script>
+</body>
+</html>

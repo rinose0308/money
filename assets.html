@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>資産 | 我が家マネー</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <main class="container">
+    <div id="loading" class="loading"><div class="spinner"></div><p>読み込み中...</p></div>
+    <div id="content" style="display:none;">
+      <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+        <h1 style="margin: 0; font-size: 1.5rem;">資産管理</h1>
+        <div style="display:flex; gap: 0.5rem; flex-wrap: wrap;">
+          <button class="btn btn-ghost" id="add-account-btn">＋ 口座を追加</button>
+          <button class="btn btn-primary" id="enter-balance-btn">残高を入力</button>
+        </div>
+      </div>
+
+      <!-- 口座一覧 -->
+      <div id="accounts-section">
+        <div id="accounts-empty" class="card empty-state" style="display:none;">
+          <h3>まだ口座がありません</h3>
+          <p>口座を追加するか、過去のCSVを取り込みましょう</p>
+          <div style="display:flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-primary" id="add-account-empty-btn">口座を追加</button>
+            <a href="/import.html" class="btn btn-ghost">CSVを取り込む</a>
+          </div>
+        </div>
+
+        <div id="accounts-list" class="card" style="padding: 0;">
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>口座名</th>
+                  <th>種別</th>
+                  <th class="num">最新残高</th>
+                  <th class="num">前月比</th>
+                  <th>最終更新</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="accounts-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 口座追加/編集モーダル -->
+  <div id="account-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+      <h2 class="modal-title" id="account-modal-title">口座を追加</h2>
+      <form id="account-form">
+        <input type="hidden" id="account-id">
+        <div class="form-group">
+          <label class="form-label" for="account-name">口座名 <span style="color:var(--danger)">*</span></label>
+          <input type="text" id="account-name" class="form-input" required maxlength="50" placeholder="例: SBI証券 夫">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="account-type">種別 <span style="color:var(--danger)">*</span></label>
+          <select id="account-type" class="form-select" required>
+            <option value="bank">預貯金</option>
+            <option value="jp_stock">日本株</option>
+            <option value="foreign_stock">外国株</option>
+            <option value="mutual_fund">投資信託</option>
+            <option value="insurance">保険</option>
+            <option value="pension">年金/共済</option>
+            <option value="other">その他</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="account-owner">名義人</label>
+          <select id="account-owner" class="form-select">
+            <option value="">(共有)</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="account-cancel">キャンセル</button>
+          <button type="button" class="btn btn-danger" id="account-deactivate" style="display:none;">非表示にする</button>
+          <button type="submit" class="btn btn-primary" id="account-save">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 残高入力モーダル -->
+  <div id="balance-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal modal-large">
+      <h2 class="modal-title">月次残高を入力</h2>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0 0 1rem;">対象月の月末残高を口座ごとに入力してください</p>
+
+      <div class="form-group">
+        <label class="form-label" for="balance-month">対象月</label>
+        <input type="month" id="balance-month" class="form-input" required>
+      </div>
+
+      <div id="balance-rows-loading" style="text-align:center; padding: 1rem;">
+        <span class="spinner"></span> 既存の値を読み込み中...
+      </div>
+
+      <div class="table-wrap" id="balance-rows-wrap" style="display:none;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>口座</th>
+              <th class="num">残高 (円)</th>
+              <th class="num">評価損益 (任意)</th>
+            </tr>
+          </thead>
+          <tbody id="balance-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="balance-cancel">キャンセル</button>
+        <button type="button" class="btn btn-primary" id="balance-save">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { requireAuth, supabase } from '/js/supabase.js';
+    import { renderNav } from '/js/nav.js';
+    import { listAccounts, createAccount, updateAccount, deactivateAccount, listSnapshots, upsertSnapshot } from '/js/api.js';
+    import { formatYen, formatYenShort, formatPercent, formatDate, lastDayOfMonth, toast, withErrorToast } from '/js/utils.js';
+
+    const auth = await requireAuth();
+    if (!auth) throw new Error('not authenticated');
+    renderNav('/assets.html');
+
+    // 同じ世帯のメンバー取得 (名義人セレクト用)
+    async function getMembers() {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, display_name')
+        .eq('household_id', auth.profile.household_id);
+      if (error) throw error;
+      return data ?? [];
+    }
+
+    const TYPE_LABELS = {
+      bank: '預貯金', jp_stock: '日本株', foreign_stock: '外国株',
+      mutual_fund: '投資信託', insurance: '保険', pension: '年金/共済', other: 'その他',
+    };
+
+    let accountsCache = [];
+    let membersCache = [];
+
+    async function refresh() {
+      accountsCache = await listAccounts();
+      membersCache = await getMembers();
+
+      const tbody = document.getElementById('accounts-tbody');
+      const list = document.getElementById('accounts-list');
+      const empty = document.getElementById('accounts-empty');
+
+      if (accountsCache.length === 0) {
+        list.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      list.style.display = 'block';
+      empty.style.display = 'none';
+
+      // 各口座の最新スナップショット
+      const allSnaps = await listSnapshots({});
+      const byAccount = new Map();
+      for (const s of allSnaps) {
+        if (!byAccount.has(s.account_id)) byAccount.set(s.account_id, []);
+        byAccount.get(s.account_id).push(s);
+      }
+
+      tbody.innerHTML = '';
+      for (const acc of accountsCache) {
+        const snaps = (byAccount.get(acc.id) ?? []).sort((a,b) => a.snapshot_date.localeCompare(b.snapshot_date));
+        const latest = snaps[snaps.length - 1];
+        const prev = snaps[snaps.length - 2];
+
+        const ownerName = acc.owner_profile_id
+          ? (membersCache.find(m => m.id === acc.owner_profile_id)?.display_name ?? '?')
+          : '';
+
+        const diff = latest && prev ? Number(latest.balance) - Number(prev.balance) : null;
+        const diffCls = diff == null ? '' : (diff >= 0 ? 'up' : 'down');
+        const diffStr = diff == null ? '—' : (diff >= 0 ? '+' : '') + formatYen(diff);
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>
+            <div style="font-weight:500;">${escapeHtml(acc.name)}</div>
+            ${ownerName ? `<div style="font-size:0.8rem;color:var(--text-muted);">${escapeHtml(ownerName)}</div>` : ''}
+          </td>
+          <td><span class="badge ${acc.account_type}">${TYPE_LABELS[acc.account_type] ?? acc.account_type}</span></td>
+          <td class="num">${latest ? formatYen(latest.balance) : '—'}</td>
+          <td class="num"><span class="card-sub ${diffCls}">${diffStr}</span></td>
+          <td style="font-size:0.85rem;color:var(--text-muted);">${latest ? latest.snapshot_date : '—'}</td>
+          <td>
+            <button class="btn btn-ghost btn-sm edit-btn" data-id="${acc.id}">編集</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+      tbody.querySelectorAll('.edit-btn').forEach(b => {
+        b.addEventListener('click', () => openAccountModal(b.dataset.id));
+      });
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+    }
+
+    // ============ 口座 追加/編集 モーダル ============
+    const accountModal = document.getElementById('account-modal');
+    const accountForm = document.getElementById('account-form');
+
+    function openAccountModal(id = null) {
+      const acc = id ? accountsCache.find(a => a.id === id) : null;
+      document.getElementById('account-modal-title').textContent = acc ? '口座を編集' : '口座を追加';
+      document.getElementById('account-id').value = acc?.id ?? '';
+      document.getElementById('account-name').value = acc?.name ?? '';
+      document.getElementById('account-type').value = acc?.account_type ?? 'bank';
+      // 名義人セレクト
+      const ownerSel = document.getElementById('account-owner');
+      ownerSel.innerHTML = '<option value="">(共有)</option>' +
+        membersCache.map(m => `<option value="${m.id}">${escapeHtml(m.display_name)}</option>`).join('');
+      ownerSel.value = acc?.owner_profile_id ?? '';
+      // 削除ボタン
+      document.getElementById('account-deactivate').style.display = acc ? 'inline-flex' : 'none';
+
+      accountModal.style.display = 'flex';
+    }
+    function closeAccountModal() { accountModal.style.display = 'none'; }
+
+    document.getElementById('add-account-btn').addEventListener('click', () => openAccountModal());
+    document.getElementById('add-account-empty-btn').addEventListener('click', () => openAccountModal());
+    document.getElementById('account-cancel').addEventListener('click', closeAccountModal);
+    accountModal.addEventListener('click', (e) => { if (e.target === accountModal) closeAccountModal(); });
+
+    accountForm.addEventListener('submit', withErrorToast(async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('account-id').value;
+      const name = document.getElementById('account-name').value.trim();
+      const account_type = document.getElementById('account-type').value;
+      const owner_profile_id = document.getElementById('account-owner').value || null;
+      if (!name) return;
+
+      if (id) {
+        await updateAccount(id, { name, account_type, owner_profile_id });
+        toast('口座を更新しました', 'success');
+      } else {
+        await createAccount({ name, account_type, owner_profile_id });
+        toast('口座を追加しました', 'success');
+      }
+      closeAccountModal();
+      await refresh();
+    }));
+
+    document.getElementById('account-deactivate').addEventListener('click', withErrorToast(async () => {
+      const id = document.getElementById('account-id').value;
+      if (!id) return;
+      if (!confirm('この口座を非表示にしますか?\n(過去のデータは残ります)')) return;
+      await deactivateAccount(id);
+      toast('口座を非表示にしました', 'success');
+      closeAccountModal();
+      await refresh();
+    }));
+
+    // ============ 残高入力 モーダル ============
+    const balanceModal = document.getElementById('balance-modal');
+    const balanceMonth = document.getElementById('balance-month');
+
+    document.getElementById('enter-balance-btn').addEventListener('click', async () => {
+      if (accountsCache.length === 0) {
+        toast('先に口座を追加してください', 'warn');
+        return;
+      }
+      // デフォルトは今月
+      const now = new Date();
+      balanceMonth.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      balanceModal.style.display = 'flex';
+      await loadBalanceRows();
+    });
+
+    document.getElementById('balance-cancel').addEventListener('click', () => {
+      balanceModal.style.display = 'none';
+    });
+    balanceModal.addEventListener('click', (e) => { if (e.target === balanceModal) balanceModal.style.display = 'none'; });
+
+    balanceMonth.addEventListener('change', loadBalanceRows);
+
+    async function loadBalanceRows() {
+      const monthStr = balanceMonth.value;
+      if (!monthStr) return;
+      const [year, month] = monthStr.split('-').map(Number);
+      const targetDate = lastDayOfMonth(year, month);
+
+      document.getElementById('balance-rows-loading').style.display = 'block';
+      document.getElementById('balance-rows-wrap').style.display = 'none';
+
+      const existing = await listSnapshots({ fromDate: targetDate, toDate: targetDate });
+      const existingMap = new Map(existing.map(s => [s.account_id, s]));
+
+      const tbody = document.getElementById('balance-tbody');
+      tbody.innerHTML = '';
+      for (const acc of accountsCache) {
+        const ex = existingMap.get(acc.id);
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>
+            <div style="font-weight:500;">${escapeHtml(acc.name)}</div>
+            <div style="font-size:0.8rem;color:var(--text-muted);">${TYPE_LABELS[acc.account_type] ?? ''}</div>
+          </td>
+          <td class="num"><input type="number" inputmode="numeric" data-account-id="${acc.id}" data-field="balance" class="form-input balance-input" style="text-align:right;" value="${ex ? Math.round(Number(ex.balance)) : ''}" placeholder="0"></td>
+          <td class="num"><input type="number" inputmode="numeric" data-account-id="${acc.id}" data-field="pnl" class="form-input balance-input" style="text-align:right;" value="${ex?.unrealized_pnl != null ? Math.round(Number(ex.unrealized_pnl)) : ''}" placeholder="(株のみ)"></td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      document.getElementById('balance-rows-loading').style.display = 'none';
+      document.getElementById('balance-rows-wrap').style.display = 'block';
+    }
+
+    document.getElementById('balance-save').addEventListener('click', withErrorToast(async () => {
+      const monthStr = balanceMonth.value;
+      if (!monthStr) { toast('対象月を選択してください', 'warn'); return; }
+      const [year, month] = monthStr.split('-').map(Number);
+      const targetDate = lastDayOfMonth(year, month);
+
+      const inputs = document.querySelectorAll('.balance-input');
+      const byAccount = new Map();
+      inputs.forEach(inp => {
+        const id = inp.dataset.accountId;
+        if (!byAccount.has(id)) byAccount.set(id, {});
+        byAccount.get(id)[inp.dataset.field] = inp.value.trim();
+      });
+
+      const saveBtn = document.getElementById('balance-save');
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<span class="spinner"></span> 保存中...';
+
+      let saved = 0;
+      for (const [accountId, vals] of byAccount.entries()) {
+        if (!vals.balance) continue;
+        const balance = parseInt(vals.balance, 10);
+        if (isNaN(balance)) continue;
+        const pnl = vals.pnl ? parseInt(vals.pnl, 10) : null;
+        await upsertSnapshot({
+          account_id: accountId,
+          snapshot_date: targetDate,
+          balance,
+          unrealized_pnl: isNaN(pnl) ? null : pnl,
+          source: 'manual',
+        });
+        saved++;
+      }
+
+      saveBtn.disabled = false;
+      saveBtn.textContent = '保存';
+      toast(`${saved}件の残高を保存しました`, 'success');
+      balanceModal.style.display = 'none';
+      await refresh();
+    }));
+
+    // ============ 初期表示 ============
+    await refresh();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+  </script>
+</body>
+</html>

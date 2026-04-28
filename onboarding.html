@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>初回設定 | 我が家マネー</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <main class="auth-screen">
+    <div class="auth-card">
+      <h1 class="auth-title">ようこそ</h1>
+      <p class="auth-subtitle">初回設定 (1分で完了)</p>
+
+      <form id="onboarding-form">
+        <div class="form-group">
+          <label class="form-label" for="display_name">表示名</label>
+          <input
+            type="text"
+            id="display_name"
+            class="form-input"
+            required
+            placeholder="例: 夫 / 妻 / 太郎"
+            maxlength="30"
+          >
+          <p class="form-help">家計簿に表示されるあなたの名前</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">参加方法</label>
+          <div class="radio-group">
+            <label class="radio-option">
+              <input type="radio" name="mode" value="create" checked>
+              <div>
+                <div class="radio-label">新しく世帯を作る</div>
+                <div class="radio-desc">最初の登録者はこちら。世帯コードが発行されます</div>
+              </div>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="mode" value="join">
+              <div>
+                <div class="radio-label">配偶者の世帯に参加する</div>
+                <div class="radio-desc">先に登録した人から世帯コードをもらってください</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group" id="household-name-group">
+          <label class="form-label" for="household_name">世帯名</label>
+          <input
+            type="text"
+            id="household_name"
+            class="form-input"
+            placeholder="例: 鈴木家"
+            maxlength="50"
+          >
+        </div>
+
+        <div class="form-group" id="invite-code-group" style="display:none;">
+          <label class="form-label" for="invite_code">世帯コード</label>
+          <input
+            type="text"
+            id="invite_code"
+            class="form-input"
+            placeholder="8文字のコード"
+            maxlength="8"
+            style="text-transform: uppercase; letter-spacing: 0.1em; font-family: monospace;"
+          >
+          <p class="form-help">配偶者の画面に表示されているコードを入力</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="submit-btn">
+          設定を完了
+        </button>
+      </form>
+    </div>
+  </main>
+
+  <script type="module">
+    import { supabase, getUser, generateInviteCode } from '/js/supabase.js';
+    import { toast, withErrorToast } from '/js/utils.js';
+
+    // 認証チェック
+    (async () => {
+      const user = await getUser();
+      if (!user) window.location.replace('/index.html');
+
+      // 既にprofile作成済みなら dashboard へ
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (existing) window.location.replace('/dashboard.html');
+    })();
+
+    // モード切替
+    const modeRadios = document.querySelectorAll('input[name="mode"]');
+    const householdNameGroup = document.getElementById('household-name-group');
+    const inviteCodeGroup = document.getElementById('invite-code-group');
+    modeRadios.forEach(r => r.addEventListener('change', () => {
+      const mode = document.querySelector('input[name="mode"]:checked').value;
+      householdNameGroup.style.display = mode === 'create' ? 'block' : 'none';
+      inviteCodeGroup.style.display = mode === 'join' ? 'block' : 'none';
+    }));
+
+    // フォーム送信
+    const form = document.getElementById('onboarding-form');
+    const submitBtn = document.getElementById('submit-btn');
+
+    form.addEventListener('submit', withErrorToast(async (e) => {
+      e.preventDefault();
+      const user = await getUser();
+      if (!user) return;
+
+      const displayName = document.getElementById('display_name').value.trim();
+      if (!displayName) { toast('表示名を入力してください', 'error'); return; }
+
+      const mode = document.querySelector('input[name="mode"]:checked').value;
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner"></span> 処理中...';
+
+      let householdId = null;
+
+      if (mode === 'create') {
+        const householdName = document.getElementById('household_name').value.trim() || `${displayName}の世帯`;
+        const inviteCode = generateInviteCode();
+
+        const { data: hh, error: hhErr } = await supabase
+          .from('households')
+          .insert({ name: householdName, invite_code: inviteCode })
+          .select()
+          .single();
+        if (hhErr) throw hhErr;
+        householdId = hh.id;
+      } else {
+        const code = document.getElementById('invite_code').value.trim().toUpperCase();
+        if (code.length !== 8) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = '設定を完了';
+          toast('世帯コードは8文字で入力してください', 'error');
+          return;
+        }
+        const { data: hh, error: hhErr } = await supabase
+          .from('households')
+          .select('id')
+          .eq('invite_code', code)
+          .maybeSingle();
+        if (hhErr) throw hhErr;
+        if (!hh) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = '設定を完了';
+          toast('世帯コードが見つかりません', 'error');
+          return;
+        }
+        householdId = hh.id;
+      }
+
+      // profile 作成
+      const { error: profErr } = await supabase
+        .from('profiles')
+        .insert({ id: user.id, display_name: displayName, household_id: householdId });
+      if (profErr) throw profErr;
+
+      toast('設定が完了しました', 'success');
+      setTimeout(() => window.location.replace('/dashboard.html'), 600);
+    }));
+  </script>
+</body>
+</html>

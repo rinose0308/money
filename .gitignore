@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node (将来追加するかも)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 環境変数(現状は config.js のみ。SUPABASE_URL/anon は公開OK)
+.env
+.env.local
+.env.*.local
+
+# ログ
+*.log
+
+# 一時ファイル
+tmp/
+*.tmp
