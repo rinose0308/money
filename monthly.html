@@ -24,38 +24,44 @@
       </div>
 
       <div id="form-area" style="display:none;">
+        <!-- 名義未登録時の警告 -->
+        <div id="no-members-warn" class="card" style="display:none; background:#fef3c7; border-color:#fcd34d; margin-bottom: 1rem;">
+          <strong>⚠️ 名義が未登録です</strong>
+          <p style="margin: 0.5rem 0 0; font-size: 0.9rem;">
+            <a href="/settings.html">設定画面</a>で名義(りょちょ・まちょなど)を登録すると、名義ごとに資産・収入・支出を分けて入力できます。
+          </p>
+        </div>
+
         <!-- 資産残高 -->
         <div class="card" style="margin-bottom: 1rem;">
           <h3 style="margin: 0 0 0.5rem; font-size: 1.05rem;">資産残高 (月末)</h3>
           <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
-            登録済の口座だけ表示されます。<a href="/assets.html">資産画面</a>から口座を追加できます。
+            各口座について、名義ごとに月末残高を入力してください。空欄の名義は保存されません。
           </p>
           <div class="table-wrap" id="assets-table-wrap" style="display:none;">
             <table class="table">
-              <thead>
-                <tr>
-                  <th>口座</th>
-                  <th class="num">残高 (円)</th>
-                </tr>
-              </thead>
+              <thead id="assets-thead"></thead>
               <tbody id="assets-tbody"></tbody>
             </table>
           </div>
-          <div id="assets-empty" class="empty-state" style="padding: 1rem;">
+          <div id="assets-empty" class="empty-state" style="padding: 1rem; display:none;">
             <p style="margin: 0;">口座が未登録です</p>
-            <a href="/assets.html" class="btn btn-primary btn-sm" style="margin-top: 0.5rem;">口座を追加</a>
+            <a href="/settings.html" class="btn btn-primary btn-sm" style="margin-top: 0.5rem;">口座を追加</a>
           </div>
         </div>
 
         <!-- 収入 -->
         <div class="card" style="margin-bottom: 1rem;">
           <h3 style="margin: 0 0 0.5rem; font-size: 1.05rem;">収入</h3>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+            名義ごとに金額を入力してください(0円や空欄でもOK)。
+          </p>
           <div class="table-wrap">
             <table class="table">
               <thead>
                 <tr>
-                  <th>カテゴリ</th>
                   <th>名義</th>
+                  <th>カテゴリ</th>
                   <th class="num">金額 (円)</th>
                   <th></th>
                 </tr>
@@ -68,20 +74,21 @@
 
         <!-- 支出 -->
         <div class="card" style="margin-bottom: 1rem;">
-          <h3 style="margin: 0 0 0.5rem; font-size: 1.05rem;">支出 (カテゴリ別の月合計)</h3>
+          <h3 style="margin: 0 0 0.5rem; font-size: 1.05rem;">支出 (名義ごとの月合計)</h3>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+            各名義の今月の合計支出額を入力してください。
+          </p>
           <div class="table-wrap">
             <table class="table">
               <thead>
                 <tr>
-                  <th>カテゴリ</th>
-                  <th class="num">金額 (円)</th>
-                  <th></th>
+                  <th>名義</th>
+                  <th class="num">月の合計支出 (円)</th>
                 </tr>
               </thead>
               <tbody id="expense-tbody"></tbody>
             </table>
           </div>
-          <button type="button" class="btn btn-ghost btn-sm" id="add-expense-btn" style="margin-top: 0.5rem;">＋ カテゴリを追加</button>
         </div>
 
         <!-- 保存 -->
@@ -93,10 +100,11 @@
   </main>
 
   <script type="module">
-    import { requireAuth, supabase } from '/js/supabase.js';
+    import { requireAuth } from '/js/supabase.js';
     import { renderNav } from '/js/nav.js';
     import {
-      listAccounts, listSnapshots, upsertSnapshot,
+      listAccounts, listSnapshots, replaceAccountMonthSnapshots,
+      listMembers,
       listIncomes, replaceMonthlyIncomes,
       listMonthlyTransactions, replaceMonthlyTransactions,
       monthEndDate,
@@ -107,14 +115,12 @@
     if (!auth) throw new Error('not authenticated');
     renderNav('/monthly.html');
 
-    // 世帯メンバー(名義人セレクト用)
-    const { data: members } = await supabase
-      .from('profiles')
-      .select('id, display_name')
-      .eq('household_id', auth.profile.household_id);
+    const TYPE_LABELS = {
+      bank: '預貯金', jp_stock: '日本株', foreign_stock: '外国株',
+      mutual_fund: '投資信託', insurance: '保険', pension: '年金/共済', other: 'その他',
+    };
 
     const DEFAULT_INCOME_CATEGORIES = ['給与', 'ボーナス', '副収入', 'その他'];
-    const DEFAULT_EXPENSE_CATEGORIES = ['食費','住居','水道光熱費','通信費','交通費','娯楽','日用品','医療費','衣服','教育','その他'];
 
     function escapeHtml(s) {
       return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
@@ -141,6 +147,7 @@
 
     // =========== ロード処理 ===========
     let accountsCache = [];
+    let membersCache = [];
 
     async function loadMonth() {
       document.getElementById('form-area').style.display = 'none';
@@ -149,83 +156,137 @@
       const [y, m] = monthInput.value.split('-').map(Number);
       const dateStr = monthEndDate(y, m);
 
-      // 資産: 全ての口座 + その月の既存スナップショット
-      accountsCache = await listAccounts({ includeInactive: false });
+      [membersCache, accountsCache] = await Promise.all([
+        listMembers(),
+        listAccounts({ includeInactive: false }),
+      ]);
+
+      // 名義未登録時の警告
+      document.getElementById('no-members-warn').style.display = membersCache.length === 0 ? 'block' : 'none';
+
+      // ===== 資産残高 (口座 × 名義 のマトリクス) =====
       const snaps = await listSnapshots({ fromDate: dateStr, toDate: dateStr });
-      const snapByAcc = new Map(snaps.map(s => [s.account_id, s]));
-
-      const aTbody = document.getElementById('assets-tbody');
-      aTbody.innerHTML = '';
-      if (accountsCache.length === 0) {
-        document.getElementById('assets-table-wrap').style.display = 'none';
-        document.getElementById('assets-empty').style.display = 'block';
-      } else {
-        document.getElementById('assets-table-wrap').style.display = 'block';
-        document.getElementById('assets-empty').style.display = 'none';
-        for (const acc of accountsCache) {
-          const ex = snapByAcc.get(acc.id);
-          const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td>
-              <div style="font-weight:500;">${escapeHtml(acc.name)}</div>
-            </td>
-            <td class="num">
-              <input type="number" inputmode="numeric" class="form-input asset-input" data-account-id="${acc.id}"
-                style="text-align:right; max-width: 200px;"
-                value="${ex ? Math.round(Number(ex.balance)) : ''}" placeholder="0">
-            </td>
-          `;
-          aTbody.appendChild(tr);
-        }
+      // (account_id, member_id|'shared') => snapshot
+      const snapMap = new Map();
+      for (const s of snaps) {
+        const key = `${s.account_id}|${s.member_id ?? 'shared'}`;
+        snapMap.set(key, s);
       }
+      renderAssetsMatrix(snapMap);
 
-      // 収入
+      // ===== 収入 (既存があれば表示、無ければ各メンバーに給与1行ずつ) =====
       const incomes = await listIncomes({ fromDate: dateStr, toDate: dateStr });
-      const incomeTbody = document.getElementById('income-tbody');
-      incomeTbody.innerHTML = '';
-      if (incomes.length === 0) {
-        // デフォルトのテンプレートを表示 (給与×名義人ごと)
-        for (const member of members ?? []) {
-          addIncomeRow({ category: '給与', earner_profile_id: member.id, amount: '' });
-        }
-        if ((members ?? []).length === 0) addIncomeRow({ category: '給与', amount: '' });
-      } else {
-        for (const inc of incomes) addIncomeRow(inc);
-      }
+      renderIncomes(incomes);
 
-      // 支出
+      // ===== 支出 (各名義に1行ずつ) =====
       const txs = await listMonthlyTransactions({ fromDate: dateStr, toDate: dateStr });
-      const expenseTbody = document.getElementById('expense-tbody');
-      expenseTbody.innerHTML = '';
-      if (txs.length === 0) {
-        for (const cat of DEFAULT_EXPENSE_CATEGORIES) addExpenseRow({ category: cat, amount: '' });
-      } else {
-        const existing = new Set(txs.map(t => t.category));
-        for (const tx of txs) addExpenseRow(tx);
-        // 既存にないデフォルトも下に追加
-        for (const cat of DEFAULT_EXPENSE_CATEGORIES) {
-          if (!existing.has(cat)) addExpenseRow({ category: cat, amount: '' });
-        }
-      }
+      renderExpenses(txs);
 
       document.getElementById('loading-month').style.display = 'none';
       document.getElementById('form-area').style.display = 'block';
     }
 
-    // =========== 行の追加・削除 ===========
-    function addIncomeRow({ category, earner_profile_id, amount, note }) {
+    // ----- 資産: 口座 × 名義 のマトリクス入力 -----
+    function renderAssetsMatrix(snapMap) {
+      const wrap = document.getElementById('assets-table-wrap');
+      const empty = document.getElementById('assets-empty');
+      const thead = document.getElementById('assets-thead');
+      const tbody = document.getElementById('assets-tbody');
+
+      if (accountsCache.length === 0) {
+        wrap.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      wrap.style.display = 'block';
+      empty.style.display = 'none';
+
+      // 列構成: 口座名 | 種別 | (各メンバー) | 共有
+      const cols = membersCache.length === 0
+        ? [{ id: null, name: '残高', color: '#94a3b8' }]
+        : [...membersCache.map(m => ({ id: m.id, name: m.name, color: m.color })), { id: null, name: '共有', color: '#94a3b8' }];
+
+      thead.innerHTML = `
+        <tr>
+          <th>口座</th>
+          <th>種別</th>
+          ${cols.map(c => `
+            <th class="num">
+              <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${escapeHtml(c.color)}; vertical-align:middle; margin-right:0.3rem;"></span>
+              ${escapeHtml(c.name)}
+            </th>
+          `).join('')}
+        </tr>
+      `;
+
+      tbody.innerHTML = '';
+      for (const acc of accountsCache) {
+        const tr = document.createElement('tr');
+        tr.classList.add('asset-row');
+        tr.dataset.accountId = acc.id;
+
+        const cells = cols.map(c => {
+          const key = `${acc.id}|${c.id ?? 'shared'}`;
+          const ex = snapMap.get(key);
+          const v = ex ? Math.round(Number(ex.balance)) : '';
+          return `
+            <td class="num">
+              <input type="number" inputmode="numeric"
+                class="form-input asset-input"
+                data-account-id="${acc.id}"
+                data-member-id="${c.id ?? ''}"
+                style="text-align:right; max-width: 160px;"
+                value="${v}" placeholder="0">
+            </td>
+          `;
+        }).join('');
+
+        tr.innerHTML = `
+          <td><div style="font-weight:500;">${escapeHtml(acc.name)}</div></td>
+          <td><span class="badge ${acc.account_type}">${TYPE_LABELS[acc.account_type] ?? acc.account_type}</span></td>
+          ${cells}
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    // ----- 収入 -----
+    function renderIncomes(incomes) {
+      const tbody = document.getElementById('income-tbody');
+      tbody.innerHTML = '';
+      if (incomes.length === 0) {
+        // デフォルト: 各メンバーに「給与」1行
+        if (membersCache.length === 0) {
+          addIncomeRow({ category: '給与', earner_member_id: null, amount: '' });
+        } else {
+          for (const m of membersCache) {
+            addIncomeRow({ category: '給与', earner_member_id: m.id, amount: '' });
+          }
+        }
+      } else {
+        for (const inc of incomes) {
+          addIncomeRow({
+            category: inc.category,
+            earner_member_id: inc.earner_member_id,
+            amount: Math.round(Number(inc.amount)),
+          });
+        }
+      }
+    }
+
+    function addIncomeRow({ category, earner_member_id, amount }) {
       const tr = document.createElement('tr');
       tr.classList.add('income-row');
       tr.innerHTML = `
         <td>
-          <select class="form-select inc-cat" style="min-width: 120px;">
-            ${DEFAULT_INCOME_CATEGORIES.map(c => `<option value="${escapeHtml(c)}"${c===category?' selected':''}>${escapeHtml(c)}</option>`).join('')}
+          <select class="form-select inc-earner" style="min-width: 130px;">
+            <option value="">(共有)</option>
+            ${membersCache.map(m => `<option value="${m.id}"${m.id===earner_member_id?' selected':''}>${escapeHtml(m.name)}</option>`).join('')}
           </select>
         </td>
         <td>
-          <select class="form-select inc-earner" style="min-width: 120px;">
-            <option value="">(共有)</option>
-            ${(members ?? []).map(m => `<option value="${m.id}"${m.id===earner_profile_id?' selected':''}>${escapeHtml(m.display_name)}</option>`).join('')}
+          <select class="form-select inc-cat" style="min-width: 120px;">
+            ${DEFAULT_INCOME_CATEGORIES.map(c => `<option value="${escapeHtml(c)}"${c===category?' selected':''}>${escapeHtml(c)}</option>`).join('')}
           </select>
         </td>
         <td class="num"><input type="number" inputmode="numeric" class="form-input inc-amount" style="text-align:right; max-width: 200px;" value="${amount ?? ''}" placeholder="0"></td>
@@ -235,20 +296,43 @@
       document.getElementById('income-tbody').appendChild(tr);
     }
 
-    function addExpenseRow({ category, amount }) {
-      const tr = document.createElement('tr');
-      tr.classList.add('expense-row');
-      tr.innerHTML = `
-        <td><input type="text" class="form-input exp-cat" value="${escapeHtml(category ?? '')}" placeholder="カテゴリ名" maxlength="20"></td>
-        <td class="num"><input type="number" inputmode="numeric" class="form-input exp-amount" style="text-align:right; max-width: 200px;" value="${amount ?? ''}" placeholder="0"></td>
-        <td><button type="button" class="btn btn-ghost btn-sm row-del">✕</button></td>
-      `;
-      tr.querySelector('.row-del').addEventListener('click', () => tr.remove());
-      document.getElementById('expense-tbody').appendChild(tr);
-    }
+    document.getElementById('add-income-btn').addEventListener('click', () => addIncomeRow({ category: '給与', earner_member_id: null, amount: '' }));
 
-    document.getElementById('add-income-btn').addEventListener('click', () => addIncomeRow({ category: '給与', amount: '' }));
-    document.getElementById('add-expense-btn').addEventListener('click', () => addExpenseRow({ category: '', amount: '' }));
+    // ----- 支出 -----
+    function renderExpenses(txs) {
+      const tbody = document.getElementById('expense-tbody');
+      tbody.innerHTML = '';
+      // 既存の payer_member_id ごとの合計
+      const totalByMember = new Map(); // member_id (or 'shared') => amount
+      for (const tx of txs) {
+        const k = tx.payer_member_id ?? 'shared';
+        if (!totalByMember.has(k)) totalByMember.set(k, 0);
+        totalByMember.set(k, totalByMember.get(k) + Math.round(Number(tx.amount)));
+      }
+
+      // 各メンバー + 共有
+      const targets = membersCache.length > 0
+        ? [...membersCache.map(m => ({ id: m.id, name: m.name, color: m.color })), { id: null, name: '共有', color: '#94a3b8' }]
+        : [{ id: null, name: '合計', color: '#94a3b8' }];
+
+      for (const t of targets) {
+        const k = t.id ?? 'shared';
+        const amount = totalByMember.get(k) ?? '';
+        const tr = document.createElement('tr');
+        tr.classList.add('expense-row');
+        tr.dataset.memberId = t.id ?? '';
+        tr.innerHTML = `
+          <td>
+            <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${escapeHtml(t.color || '#94a3b8')}; vertical-align:middle; margin-right:0.4rem;"></span>
+            ${escapeHtml(t.name)}
+          </td>
+          <td class="num">
+            <input type="number" inputmode="numeric" class="form-input exp-amount" style="text-align:right; max-width: 200px;" value="${amount}" placeholder="0">
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
 
     // =========== 保存 ===========
     document.getElementById('save-all-btn').addEventListener('click', withErrorToast(async () => {
@@ -260,52 +344,68 @@
       btn.innerHTML = '<span class="spinner"></span> 保存中...';
 
       try {
-        // 1. 資産
-        const assetInputs = document.querySelectorAll('.asset-input');
-        let assetSaved = 0;
-        for (const inp of assetInputs) {
-          const v = inp.value.trim();
-          if (!v) continue;
-          const balance = parseInt(v, 10);
-          if (isNaN(balance)) continue;
-          await upsertSnapshot({
-            account_id: inp.dataset.accountId,
-            snapshot_date: dateStr,
-            balance,
-            source: 'manual',
+        // 1. 資産: 各口座について「その月の全スナップショットを置換」
+        let assetAccountsSaved = 0;
+        let assetCellsSaved = 0;
+        const accountsToProcess = new Set();
+        // 入力のあった行を抽出
+        const perAccountRows = new Map(); // account_id => [{ member_id, balance }]
+        document.querySelectorAll('.asset-row').forEach(tr => {
+          const accountId = tr.dataset.accountId;
+          const inputs = tr.querySelectorAll('.asset-input');
+          let anyEntered = false;
+          const rows = [];
+          inputs.forEach(inp => {
+            const v = inp.value.trim();
+            if (!v) return;
+            const balance = parseInt(v, 10);
+            if (isNaN(balance)) return;
+            anyEntered = true;
+            const memberId = inp.dataset.memberId || null;
+            rows.push({ member_id: memberId, balance });
           });
-          assetSaved++;
+          // この口座について何か入力があった場合のみ「置換」処理
+          if (anyEntered) {
+            perAccountRows.set(accountId, rows);
+            assetCellsSaved += rows.length;
+          }
+        });
+        for (const [accountId, rows] of perAccountRows) {
+          await replaceAccountMonthSnapshots({
+            account_id: accountId,
+            year: y,
+            month: m,
+            rows,
+          });
+          assetAccountsSaved++;
         }
 
         // 2. 収入 (delete-then-insert)
         const incomeRows = [];
         document.querySelectorAll('.income-row').forEach(tr => {
-          const category = tr.querySelector('.inc-cat').value;
           const earner = tr.querySelector('.inc-earner').value || null;
+          const category = tr.querySelector('.inc-cat').value;
           const amountStr = tr.querySelector('.inc-amount').value.trim();
           if (!amountStr) return;
           const amount = parseInt(amountStr, 10);
           if (isNaN(amount) || amount <= 0) return;
-          incomeRows.push({ earner_profile_id: earner, amount, category });
+          incomeRows.push({ earner_member_id: earner, amount, category });
         });
         await replaceMonthlyIncomes({ year: y, month: m, rows: incomeRows });
 
-        // 3. 支出 (delete-then-insert, monthly_manual)
+        // 3. 支出 (delete-then-insert, 名義ごとの合計を1件ずつ)
         const expenseRows = [];
-        const seenCats = new Set();
         document.querySelectorAll('.expense-row').forEach(tr => {
-          const category = tr.querySelector('.exp-cat').value.trim();
+          const memberId = tr.dataset.memberId || null;
           const amountStr = tr.querySelector('.exp-amount').value.trim();
-          if (!category || !amountStr) return;
+          if (!amountStr) return;
           const amount = parseInt(amountStr, 10);
           if (isNaN(amount) || amount <= 0) return;
-          if (seenCats.has(category)) return; // 重複カテゴリは最初の1つだけ
-          seenCats.add(category);
-          expenseRows.push({ category, amount });
+          expenseRows.push({ category: 'total', amount, payer_member_id: memberId, description: '月合計' });
         });
         await replaceMonthlyTransactions({ year: y, month: m, rows: expenseRows });
 
-        toast(`資産${assetSaved}件 / 収入${incomeRows.length}件 / 支出${expenseRows.length}件 を保存しました`, 'success');
+        toast(`資産${assetAccountsSaved}口座(${assetCellsSaved}件) / 収入${incomeRows.length}件 / 支出${expenseRows.length}件 を保存しました`, 'success');
       } finally {
         btn.disabled = false;
         btn.innerHTML = '💾 この月をまとめて保存';

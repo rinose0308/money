@@ -2,13 +2,58 @@
 import { supabase, getMyProfile } from '/js/supabase.js';
 
 // ============================================================
+// 名義 (household_members)
+// ============================================================
+export async function listMembers({ includeInactive = false } = {}) {
+  let q = supabase
+    .from('household_members')
+    .select('id, name, color, display_order, is_active, linked_profile_id')
+    .order('display_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (!includeInactive) q = q.eq('is_active', true);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function createMember({ name, color = '#3b82f6', linked_profile_id = null, display_order = 0 }) {
+  const profile = await getMyProfile();
+  if (!profile) throw new Error('プロファイルが見つかりません');
+  const { data, error } = await supabase
+    .from('household_members')
+    .insert({
+      household_id: profile.household_id,
+      name, color, linked_profile_id, display_order,
+    })
+    .select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateMember(id, updates) {
+  const { data, error } = await supabase
+    .from('household_members')
+    .update(updates)
+    .eq('id', id)
+    .select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteMember(id) {
+  const { error } = await supabase.from('household_members').delete().eq('id', id);
+  if (error) throw error;
+  return true;
+}
+
+// ============================================================
 // 口座 (accounts)
 // ============================================================
 
 export async function listAccounts({ includeInactive = false } = {}) {
   let q = supabase
     .from('accounts')
-    .select('id, name, account_type, owner_profile_id, display_order, is_active, created_at')
+    .select('id, name, account_type, owner_profile_id, owner_member_id, display_order, is_active, created_at')
     .order('display_order', { ascending: true })
     .order('created_at', { ascending: true });
 
@@ -19,7 +64,7 @@ export async function listAccounts({ includeInactive = false } = {}) {
   return data ?? [];
 }
 
-export async function createAccount({ name, account_type, owner_profile_id = null, display_order = 0 }) {
+export async function createAccount({ name, account_type, owner_member_id = null, display_order = 0 }) {
   const profile = await getMyProfile();
   if (!profile) throw new Error('プロファイルが見つかりません');
 
@@ -29,7 +74,7 @@ export async function createAccount({ name, account_type, owner_profile_id = nul
       household_id: profile.household_id,
       name,
       account_type,
-      owner_profile_id,
+      owner_member_id,
       display_order,
     })
     .select()
@@ -61,7 +106,7 @@ export async function deactivateAccount(id) {
 export async function listSnapshots({ accountId = null, fromDate = null, toDate = null } = {}) {
   let q = supabase
     .from('asset_snapshots')
-    .select('id, account_id, snapshot_date, balance, unrealized_pnl, source, note')
+    .select('id, account_id, snapshot_date, member_id, balance, unrealized_pnl, source, note')
     .order('snapshot_date', { ascending: true });
 
   if (accountId) q = q.eq('account_id', accountId);
@@ -73,17 +118,53 @@ export async function listSnapshots({ accountId = null, fromDate = null, toDate 
   return data ?? [];
 }
 
-export async function upsertSnapshot({ account_id, snapshot_date, balance, unrealized_pnl = null, source = 'manual', note = null }) {
+// member_id を考慮した upsert (delete-then-insert方式)
+export async function upsertSnapshot({ account_id, snapshot_date, member_id = null, balance, unrealized_pnl = null, source = 'manual', note = null }) {
+  // 既存の同条件レコード(NULLは厳密にNULL一致)を削除
+  let delQ = supabase.from('asset_snapshots').delete()
+    .eq('account_id', account_id)
+    .eq('snapshot_date', snapshot_date);
+  delQ = (member_id == null) ? delQ.is('member_id', null) : delQ.eq('member_id', member_id);
+  const { error: delErr } = await delQ;
+  if (delErr) throw delErr;
+
   const { data, error } = await supabase
     .from('asset_snapshots')
-    .upsert(
-      { account_id, snapshot_date, balance, unrealized_pnl, source, note },
-      { onConflict: 'account_id,snapshot_date' }
-    )
-    .select()
-    .single();
+    .insert({ account_id, snapshot_date, member_id, balance, unrealized_pnl, source, note })
+    .select().single();
   if (error) throw error;
   return data;
+}
+
+// 月次入力: 1つの口座について「その月の全スナップショットを置換」する
+// rows: [{ member_id (null可), balance, unrealized_pnl?, note? }]
+export async function replaceAccountMonthSnapshots({ account_id, year, month, rows, source = 'manual' }) {
+  const date = monthEndDate(year, month);
+
+  // この (account_id, date) の全スナップショットを削除
+  const { error: delErr } = await supabase
+    .from('asset_snapshots')
+    .delete()
+    .eq('account_id', account_id)
+    .eq('snapshot_date', date);
+  if (delErr) throw delErr;
+
+  if (rows.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('asset_snapshots')
+    .insert(rows.map(r => ({
+      account_id,
+      snapshot_date: date,
+      member_id: r.member_id ?? null,
+      balance: r.balance,
+      unrealized_pnl: r.unrealized_pnl ?? null,
+      note: r.note ?? null,
+      source,
+    })))
+    .select();
+  if (error) throw error;
+  return data ?? [];
 }
 
 // 月次の月末日 (snapshot_dateの規約と統一)
@@ -101,7 +182,7 @@ export function monthEndDate(year, month1to12) {
 export async function listIncomes({ fromDate, toDate } = {}) {
   let q = supabase
     .from('incomes')
-    .select('id, earner_profile_id, occurred_on, amount, category, note')
+    .select('id, earner_profile_id, earner_member_id, occurred_on, amount, category, note')
     .order('occurred_on', { ascending: true });
   if (fromDate) q = q.gte('occurred_on', fromDate);
   if (toDate)   q = q.lte('occurred_on', toDate);
@@ -128,7 +209,7 @@ export async function replaceMonthlyIncomes({ year, month, rows }) {
     .from('incomes')
     .insert(rows.map(r => ({
       household_id: profile.household_id,
-      earner_profile_id: r.earner_profile_id ?? null,
+      earner_member_id: r.earner_member_id ?? null,
       occurred_on: date,
       amount: r.amount,
       category: r.category,
@@ -145,7 +226,7 @@ export async function replaceMonthlyIncomes({ year, month, rows }) {
 export async function listMonthlyTransactions({ fromDate, toDate } = {}) {
   let q = supabase
     .from('transactions')
-    .select('id, occurred_on, amount, category, description, source')
+    .select('id, occurred_on, amount, category, description, payer_member_id, source')
     .eq('source', 'monthly_manual')
     .order('occurred_on', { ascending: true });
   if (fromDate) q = q.gte('occurred_on', fromDate);
@@ -156,6 +237,7 @@ export async function listMonthlyTransactions({ fromDate, toDate } = {}) {
 }
 
 // 指定月の monthly_manual な支出を全置換
+// rows: [{ category, amount, description, payer_member_id }]
 export async function replaceMonthlyTransactions({ year, month, rows }) {
   const profile = await getMyProfile();
   if (!profile) throw new Error('プロファイルが見つかりません');
@@ -179,7 +261,9 @@ export async function replaceMonthlyTransactions({ year, month, rows }) {
       category: r.category,
       description: r.description ?? null,
       source: 'monthly_manual',
-      external_id: `monthly:${date}:${r.category}`, // 重複防止
+      payer_member_id: r.payer_member_id ?? null,
+      // external_id は名義込みの一意キー (1月複数支出を許容)
+      external_id: `monthly:${date}:${r.payer_member_id ?? 'shared'}:${r.category}`,
     })))
     .select();
   if (error) throw error;
@@ -201,9 +285,29 @@ export async function updateHousehold({ householdId, updates }) {
 }
 
 // 一括 upsert (CSVインポート用)
+// 全行 member_id=NULL の前提。既存の (account_id, snapshot_date, member_id IS NULL) 行を削除してから挿入
 export async function bulkUpsertSnapshots(rows) {
   if (rows.length === 0) return [];
-  // 1000件ずつチャンク
+
+  // 影響を受ける (account_id, snapshot_date) の一覧を抽出
+  const accountToDates = new Map();
+  for (const r of rows) {
+    if (!accountToDates.has(r.account_id)) accountToDates.set(r.account_id, new Set());
+    accountToDates.get(r.account_id).add(r.snapshot_date);
+  }
+
+  // 既存の共有スナップショットを削除
+  for (const [accountId, dates] of accountToDates) {
+    const { error: delErr } = await supabase
+      .from('asset_snapshots')
+      .delete()
+      .eq('account_id', accountId)
+      .in('snapshot_date', Array.from(dates))
+      .is('member_id', null);
+    if (delErr) throw delErr;
+  }
+
+  // 挿入 (member_id=NULL 明示)
   const chunks = [];
   for (let i = 0; i < rows.length; i += 1000) chunks.push(rows.slice(i, i + 1000));
 
@@ -211,7 +315,7 @@ export async function bulkUpsertSnapshots(rows) {
   for (const chunk of chunks) {
     const { data, error } = await supabase
       .from('asset_snapshots')
-      .upsert(chunk, { onConflict: 'account_id,snapshot_date' })
+      .insert(chunk.map(r => ({ ...r, member_id: null })))
       .select();
     if (error) throw error;
     all = all.concat(data ?? []);

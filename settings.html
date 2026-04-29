@@ -29,6 +29,66 @@
         </p>
       </div>
 
+      <!-- 名義(メンバー) -->
+      <div class="card" style="margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">名義(メンバー)管理</h3>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+          資産・収入・支出を分けて記録するための名義を登録します(例: りょちょ・まちょ)。<br>
+          配偶者がアプリに登録していなくても、こちらに名義として追加できます。
+        </p>
+
+        <div class="table-wrap" id="members-wrap" style="display:none;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:30px;"></th>
+                <th>名義</th>
+                <th style="width:80px;">色</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="members-tbody"></tbody>
+          </table>
+        </div>
+        <div id="members-empty" class="empty-state" style="padding: 1rem; display:none;">
+          <p style="margin: 0;">まだ名義が登録されていません</p>
+        </div>
+
+        <div style="display:flex; gap:0.5rem; margin-top: 0.75rem; flex-wrap: wrap; align-items: center;">
+          <input type="text" id="new-member-name" class="form-input" placeholder="例: りょちょ" maxlength="20" style="max-width: 200px;">
+          <input type="color" id="new-member-color" value="#3b82f6" style="width: 50px; height: 40px; padding: 2px; border:1px solid var(--border); border-radius: 0.5rem; cursor: pointer;">
+          <button type="button" class="btn btn-primary btn-sm" id="add-member-btn">＋ 追加</button>
+        </div>
+      </div>
+
+      <!-- 口座マスタ -->
+      <div class="card" style="margin-bottom: 1rem;">
+        <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;">
+          <h3 style="margin: 0; font-size: 1rem;">口座マスタ</h3>
+          <button type="button" class="btn btn-ghost btn-sm" id="add-account-btn">＋ 口座を追加</button>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+          月次入力で扱う口座をここで管理します。月ごとの残高は<a href="/monthly.html">月次入力</a>から登録します。
+        </p>
+
+        <div class="table-wrap" id="accounts-wrap" style="display:none;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>口座名</th>
+                <th>種別</th>
+                <th>主な名義</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="accounts-tbody"></tbody>
+          </table>
+        </div>
+        <div id="accounts-empty" class="empty-state" style="padding: 1rem; display:none;">
+          <p style="margin: 0;">口座が未登録です</p>
+        </div>
+      </div>
+
       <!-- 目標金額 -->
       <div class="card" style="margin-bottom: 1rem;">
         <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">目標金額</h3>
@@ -44,19 +104,55 @@
           <button type="submit" class="btn btn-primary" id="target-save">保存</button>
         </form>
       </div>
-
-      <!-- 今後の機能 -->
-      <div class="card empty-state">
-        <h3>カテゴリ管理・自動分類ルール</h3>
-        <p>Phase 4 / 5 で実装予定</p>
-      </div>
     </div>
   </main>
+
+  <!-- 口座 追加/編集 モーダル -->
+  <div id="account-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+      <h2 class="modal-title" id="account-modal-title">口座を追加</h2>
+      <form id="account-form">
+        <input type="hidden" id="account-id">
+        <div class="form-group">
+          <label class="form-label" for="account-name">口座名 <span style="color:var(--danger)">*</span></label>
+          <input type="text" id="account-name" class="form-input" required maxlength="50" placeholder="例: SBI証券 夫">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="account-type">種別 <span style="color:var(--danger)">*</span></label>
+          <select id="account-type" class="form-select" required>
+            <option value="bank">預貯金</option>
+            <option value="jp_stock">日本株</option>
+            <option value="foreign_stock">外国株</option>
+            <option value="mutual_fund">投資信託</option>
+            <option value="insurance">保険</option>
+            <option value="pension">年金/共済</option>
+            <option value="other">その他</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="account-owner">主な名義</label>
+          <select id="account-owner" class="form-select">
+            <option value="">(共有)</option>
+          </select>
+          <p class="form-help">月次入力では各名義の列に金額を入力できます。これは「主に誰の口座か」の参考情報です。</p>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="account-cancel">キャンセル</button>
+          <button type="button" class="btn btn-danger" id="account-deactivate" style="display:none;">非表示にする</button>
+          <button type="submit" class="btn btn-primary" id="account-save">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <script type="module">
     import { requireAuth } from '/js/supabase.js';
     import { renderNav } from '/js/nav.js';
-    import { updateHousehold } from '/js/api.js';
+    import {
+      updateHousehold,
+      listMembers, createMember, updateMember, deleteMember,
+      listAccounts, createAccount, updateAccount, deactivateAccount,
+    } from '/js/api.js';
     import { toast, withErrorToast, formatYen, formatYenShort } from '/js/utils.js';
 
     const auth = await requireAuth();
@@ -76,7 +172,161 @@
       }
     });
 
-    // 目標額: 既存値を反映
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+    }
+
+    const TYPE_LABELS = {
+      bank: '預貯金', jp_stock: '日本株', foreign_stock: '外国株',
+      mutual_fund: '投資信託', insurance: '保険', pension: '年金/共済', other: 'その他',
+    };
+
+    let membersCache = [];
+    let accountsCache = [];
+
+    // ============ 名義(メンバー) ============
+    async function refreshMembers() {
+      membersCache = await listMembers({ includeInactive: true });
+      const tbody = document.getElementById('members-tbody');
+      const wrap = document.getElementById('members-wrap');
+      const empty = document.getElementById('members-empty');
+      if (membersCache.length === 0) {
+        wrap.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      wrap.style.display = 'block';
+      empty.style.display = 'none';
+      tbody.innerHTML = '';
+      for (const m of membersCache) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><span style="display:inline-block; width:14px; height:14px; border-radius:50%; background:${escapeHtml(m.color || '#3b82f6')};"></span></td>
+          <td><input type="text" class="form-input mem-name" data-id="${m.id}" value="${escapeHtml(m.name)}" maxlength="20" style="max-width: 200px;"></td>
+          <td><input type="color" class="mem-color" data-id="${m.id}" value="${escapeHtml(m.color || '#3b82f6')}" style="width:50px; height:32px; padding:2px; border:1px solid var(--border); border-radius:0.4rem; cursor:pointer;"></td>
+          <td style="display:flex; gap:0.3rem;">
+            <button type="button" class="btn btn-ghost btn-sm save-mem" data-id="${m.id}">保存</button>
+            <button type="button" class="btn btn-danger btn-sm del-mem" data-id="${m.id}">削除</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+      tbody.querySelectorAll('.save-mem').forEach(b => b.addEventListener('click', withErrorToast(async () => {
+        const id = b.dataset.id;
+        const name = tbody.querySelector(`.mem-name[data-id="${id}"]`).value.trim();
+        const color = tbody.querySelector(`.mem-color[data-id="${id}"]`).value;
+        if (!name) { toast('名前を入力してください', 'error'); return; }
+        await updateMember(id, { name, color });
+        toast('更新しました', 'success');
+        await refreshMembers();
+        await refreshAccounts();
+      })));
+      tbody.querySelectorAll('.del-mem').forEach(b => b.addEventListener('click', withErrorToast(async () => {
+        const id = b.dataset.id;
+        if (!confirm('この名義を削除しますか?\n紐付いた口座/収入/支出のリンクは外れますが、データ自体は残ります。')) return;
+        await deleteMember(id);
+        toast('削除しました', 'success');
+        await refreshMembers();
+        await refreshAccounts();
+      })));
+    }
+
+    document.getElementById('add-member-btn').addEventListener('click', withErrorToast(async () => {
+      const name = document.getElementById('new-member-name').value.trim();
+      const color = document.getElementById('new-member-color').value;
+      if (!name) { toast('名前を入力してください', 'error'); return; }
+      await createMember({ name, color });
+      document.getElementById('new-member-name').value = '';
+      toast('追加しました', 'success');
+      await refreshMembers();
+      await refreshAccounts();
+    }));
+
+    // ============ 口座マスタ ============
+    async function refreshAccounts() {
+      accountsCache = await listAccounts({ includeInactive: false });
+      const wrap = document.getElementById('accounts-wrap');
+      const empty = document.getElementById('accounts-empty');
+      const tbody = document.getElementById('accounts-tbody');
+      if (accountsCache.length === 0) {
+        wrap.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      wrap.style.display = 'block';
+      empty.style.display = 'none';
+      tbody.innerHTML = '';
+      for (const acc of accountsCache) {
+        const member = acc.owner_member_id ? membersCache.find(m => m.id === acc.owner_member_id) : null;
+        const ownerLabel = member
+          ? `<span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${escapeHtml(member.color || '#3b82f6')}; vertical-align:middle; margin-right:0.3rem;"></span>${escapeHtml(member.name)}`
+          : '<span style="color: var(--text-muted);">共有</span>';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="font-weight:500;">${escapeHtml(acc.name)}</td>
+          <td><span class="badge ${acc.account_type}">${TYPE_LABELS[acc.account_type] ?? acc.account_type}</span></td>
+          <td>${ownerLabel}</td>
+          <td><button type="button" class="btn btn-ghost btn-sm edit-acc" data-id="${acc.id}">編集</button></td>
+        `;
+        tbody.appendChild(tr);
+      }
+      tbody.querySelectorAll('.edit-acc').forEach(b => {
+        b.addEventListener('click', () => openAccountModal(b.dataset.id));
+      });
+    }
+
+    // 口座 追加/編集 モーダル
+    const accountModal = document.getElementById('account-modal');
+    const accountForm = document.getElementById('account-form');
+
+    function openAccountModal(id = null) {
+      const acc = id ? accountsCache.find(a => a.id === id) : null;
+      document.getElementById('account-modal-title').textContent = acc ? '口座を編集' : '口座を追加';
+      document.getElementById('account-id').value = acc?.id ?? '';
+      document.getElementById('account-name').value = acc?.name ?? '';
+      document.getElementById('account-type').value = acc?.account_type ?? 'bank';
+      const ownerSel = document.getElementById('account-owner');
+      ownerSel.innerHTML = '<option value="">(共有)</option>' +
+        membersCache.filter(m => m.is_active).map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
+      ownerSel.value = acc?.owner_member_id ?? '';
+      document.getElementById('account-deactivate').style.display = acc ? 'inline-flex' : 'none';
+      accountModal.style.display = 'flex';
+    }
+    function closeAccountModal() { accountModal.style.display = 'none'; }
+
+    document.getElementById('add-account-btn').addEventListener('click', () => openAccountModal());
+    document.getElementById('account-cancel').addEventListener('click', closeAccountModal);
+    accountModal.addEventListener('click', (e) => { if (e.target === accountModal) closeAccountModal(); });
+
+    accountForm.addEventListener('submit', withErrorToast(async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('account-id').value;
+      const name = document.getElementById('account-name').value.trim();
+      const account_type = document.getElementById('account-type').value;
+      const owner_member_id = document.getElementById('account-owner').value || null;
+      if (!name) return;
+      if (id) {
+        await updateAccount(id, { name, account_type, owner_member_id });
+        toast('口座を更新しました', 'success');
+      } else {
+        await createAccount({ name, account_type, owner_member_id });
+        toast('口座を追加しました', 'success');
+      }
+      closeAccountModal();
+      await refreshAccounts();
+    }));
+
+    document.getElementById('account-deactivate').addEventListener('click', withErrorToast(async () => {
+      const id = document.getElementById('account-id').value;
+      if (!id) return;
+      if (!confirm('この口座を非表示にしますか?\n(過去のデータは残ります)')) return;
+      await deactivateAccount(id);
+      toast('口座を非表示にしました', 'success');
+      closeAccountModal();
+      await refreshAccounts();
+    }));
+
+    // ============ 目標額 ============
     const targetInput = document.getElementById('target-amount');
     const targetHelper = document.getElementById('target-helper');
     const currentTarget = auth.profile.households.target_total_amount;
@@ -91,7 +341,6 @@
       targetHelper.textContent = isNaN(v) ? '未設定' : `${formatYen(v)} (${formatYenShort(v)})`;
     });
 
-    // 保存
     document.getElementById('target-form').addEventListener('submit', withErrorToast(async (e) => {
       e.preventDefault();
       const raw = targetInput.value.trim();
@@ -100,20 +349,21 @@
         toast('正しい金額を入力してください', 'error');
         return;
       }
-
       const btn = document.getElementById('target-save');
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span> 保存中...';
-
       await updateHousehold({
         householdId: auth.profile.household_id,
         updates: { target_total_amount: amount },
       });
-
       btn.disabled = false;
       btn.textContent = '保存';
       toast('目標額を保存しました', 'success');
     }));
+
+    // 初期表示
+    await refreshMembers();
+    await refreshAccounts();
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
