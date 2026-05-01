@@ -63,7 +63,7 @@
                   <th>名義</th>
                   <th>カテゴリ</th>
                   <th class="num">金額 (円)</th>
-                  <th></th>
+                  <th style="width:120px;"></th>
                 </tr>
               </thead>
               <tbody id="income-tbody"></tbody>
@@ -84,6 +84,7 @@
                 <tr>
                   <th>名義</th>
                   <th class="num">月の合計支出 (円)</th>
+                  <th style="width:90px;"></th>
                 </tr>
               </thead>
               <tbody id="expense-tbody"></tbody>
@@ -103,7 +104,7 @@
     import { requireAuth } from '/js/supabase.js';
     import { renderNav } from '/js/nav.js';
     import {
-      listAccounts, listSnapshots, replaceAccountMonthSnapshots,
+      listAccounts, listSnapshots, replaceAccountMonthSnapshots, updateAccount,
       listMembers,
       listIncomes, replaceMonthlyIncomes,
       listMonthlyTransactions, replaceMonthlyTransactions,
@@ -148,6 +149,14 @@
     // =========== ロード処理 ===========
     let accountsCache = [];
     let membersCache = [];
+    let prevSnapMap = new Map();    // (account_id|member_key) => snapshot
+    let prevIncomeMap = new Map();  // (earner_key|category) => income
+    let prevExpenseMap = new Map(); // payer_key => total amount
+
+    function prevMonthOf(year, month) {
+      if (month === 1) return { year: year - 1, month: 12 };
+      return { year, month: month - 1 };
+    }
 
     async function loadMonth() {
       document.getElementById('form-area').style.display = 'none';
@@ -155,6 +164,8 @@
 
       const [y, m] = monthInput.value.split('-').map(Number);
       const dateStr = monthEndDate(y, m);
+      const { year: py, month: pm } = prevMonthOf(y, m);
+      const prevDateStr = monthEndDate(py, pm);
 
       [membersCache, accountsCache] = await Promise.all([
         listMembers(),
@@ -164,22 +175,40 @@
       // 名義未登録時の警告
       document.getElementById('no-members-warn').style.display = membersCache.length === 0 ? 'block' : 'none';
 
-      // ===== 資産残高 (口座 × 名義 のマトリクス) =====
-      const snaps = await listSnapshots({ fromDate: dateStr, toDate: dateStr });
-      // (account_id, member_id|'shared') => snapshot
+      // 当月 + 前月 のデータを並列取得
+      const [snaps, prevSnaps, incomes, prevIncomes, txs, prevTxs] = await Promise.all([
+        listSnapshots({ fromDate: dateStr, toDate: dateStr }),
+        listSnapshots({ fromDate: prevDateStr, toDate: prevDateStr }),
+        listIncomes({ fromDate: dateStr, toDate: dateStr }),
+        listIncomes({ fromDate: prevDateStr, toDate: prevDateStr }),
+        listMonthlyTransactions({ fromDate: dateStr, toDate: dateStr }),
+        listMonthlyTransactions({ fromDate: prevDateStr, toDate: prevDateStr }),
+      ]);
+
+      // 当月 snapshot Map
       const snapMap = new Map();
       for (const s of snaps) {
-        const key = `${s.account_id}|${s.member_id ?? 'shared'}`;
-        snapMap.set(key, s);
+        snapMap.set(`${s.account_id}|${s.member_id ?? 'shared'}`, s);
       }
+      // 前月 snapshot Map
+      prevSnapMap = new Map();
+      for (const s of prevSnaps) {
+        prevSnapMap.set(`${s.account_id}|${s.member_id ?? 'shared'}`, s);
+      }
+      // 前月 income Map
+      prevIncomeMap = new Map();
+      for (const inc of prevIncomes) {
+        prevIncomeMap.set(`${inc.earner_member_id ?? ''}|${inc.category}`, inc);
+      }
+      // 前月 expense Map (payer_member_id => 合計)
+      prevExpenseMap = new Map();
+      for (const tx of prevTxs) {
+        const k = tx.payer_member_id ?? 'shared';
+        prevExpenseMap.set(k, (prevExpenseMap.get(k) ?? 0) + Math.round(Number(tx.amount)));
+      }
+
       renderAssetsMatrix(snapMap);
-
-      // ===== 収入 (既存があれば表示、無ければ各メンバーに給与1行ずつ) =====
-      const incomes = await listIncomes({ fromDate: dateStr, toDate: dateStr });
       renderIncomes(incomes);
-
-      // ===== 支出 (各名義に1行ずつ) =====
-      const txs = await listMonthlyTransactions({ fromDate: dateStr, toDate: dateStr });
       renderExpenses(txs);
 
       document.getElementById('loading-month').style.display = 'none';
@@ -201,13 +230,13 @@
       wrap.style.display = 'block';
       empty.style.display = 'none';
 
-      // 列構成: 口座名 | 種別 | (各メンバー) | 共有
       const cols = membersCache.length === 0
         ? [{ id: null, name: '残高', color: '#94a3b8' }]
         : [...membersCache.map(m => ({ id: m.id, name: m.name, color: m.color })), { id: null, name: '共有', color: '#94a3b8' }];
 
       thead.innerHTML = `
         <tr>
+          <th style="width:60px;">並替</th>
           <th>口座</th>
           <th>種別</th>
           ${cols.map(c => `
@@ -216,11 +245,12 @@
               ${escapeHtml(c.name)}
             </th>
           `).join('')}
+          <th style="width:90px;"></th>
         </tr>
       `;
 
       tbody.innerHTML = '';
-      for (const acc of accountsCache) {
+      accountsCache.forEach((acc, idx) => {
         const tr = document.createElement('tr');
         tr.classList.add('asset-row');
         tr.dataset.accountId = acc.id;
@@ -241,13 +271,83 @@
           `;
         }).join('');
 
+        const isFirst = idx === 0;
+        const isLast = idx === accountsCache.length - 1;
         tr.innerHTML = `
+          <td>
+            <div style="display:flex; flex-direction:column; gap:2px;">
+              <button type="button" class="btn btn-ghost btn-sm move-up" data-id="${acc.id}" ${isFirst ? 'disabled' : ''} title="上へ" style="padding:0.1rem 0.4rem; min-height:auto; line-height:1;">▲</button>
+              <button type="button" class="btn btn-ghost btn-sm move-down" data-id="${acc.id}" ${isLast ? 'disabled' : ''} title="下へ" style="padding:0.1rem 0.4rem; min-height:auto; line-height:1;">▼</button>
+            </div>
+          </td>
           <td><div style="font-weight:500;">${escapeHtml(acc.name)}</div></td>
           <td><span class="badge ${acc.account_type}">${TYPE_LABELS[acc.account_type] ?? acc.account_type}</span></td>
           ${cells}
+          <td>
+            <button type="button" class="btn btn-ghost btn-sm copy-prev-asset" data-id="${acc.id}" title="前月の値をコピー">前月</button>
+          </td>
         `;
         tbody.appendChild(tr);
+      });
+
+      tbody.querySelectorAll('.move-up').forEach(b => b.addEventListener('click', () => moveAccount(b.dataset.id, -1)));
+      tbody.querySelectorAll('.move-down').forEach(b => b.addEventListener('click', () => moveAccount(b.dataset.id, +1)));
+      tbody.querySelectorAll('.copy-prev-asset').forEach(b => b.addEventListener('click', () => copyPrevAsset(b.dataset.id)));
+    }
+
+    // 口座の並び替え (display_orderを書き換え)
+    async function moveAccount(accountId, direction) {
+      const idx = accountsCache.findIndex(a => a.id === accountId);
+      if (idx < 0) return;
+      const newIdx = idx + direction;
+      if (newIdx < 0 || newIdx >= accountsCache.length) return;
+
+      // メモリ上の並びを変更
+      const reordered = [...accountsCache];
+      [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
+
+      // 実際の入力値を保持しておく(再描画で消えないように)
+      const inputValues = new Map();
+      document.querySelectorAll('.asset-input').forEach(inp => {
+        inputValues.set(`${inp.dataset.accountId}|${inp.dataset.memberId}`, inp.value);
+      });
+
+      // display_order を順番に書き換え (差があるものだけ)
+      for (let i = 0; i < reordered.length; i++) {
+        if (reordered[i].display_order !== i) {
+          await updateAccount(reordered[i].id, { display_order: i });
+          reordered[i].display_order = i;
+        }
       }
+      accountsCache = reordered;
+
+      // 当月の snapshot は既に取得済みなので、それを再構築
+      // (実際にはloadMonthでもう一度取り直すのが確実)
+      await loadMonth();
+      // 入力中の値を復元
+      document.querySelectorAll('.asset-input').forEach(inp => {
+        const k = `${inp.dataset.accountId}|${inp.dataset.memberId}`;
+        if (inputValues.has(k) && inputValues.get(k) !== '') {
+          inp.value = inputValues.get(k);
+        }
+      });
+    }
+
+    // 前月の残高をコピー (口座行ごと)
+    function copyPrevAsset(accountId) {
+      const tr = document.querySelector(`.asset-row[data-account-id="${accountId}"]`);
+      if (!tr) return;
+      let copied = 0;
+      tr.querySelectorAll('.asset-input').forEach(inp => {
+        const memberId = inp.dataset.memberId || null;
+        const key = `${accountId}|${memberId ?? 'shared'}`;
+        const prev = prevSnapMap.get(key);
+        if (prev) {
+          inp.value = Math.round(Number(prev.balance));
+          copied++;
+        }
+      });
+      if (copied === 0) toast('前月のデータがありません', 'warn');
     }
 
     // ----- 収入 -----
@@ -290,10 +390,26 @@
           </select>
         </td>
         <td class="num"><input type="number" inputmode="numeric" class="form-input inc-amount" style="text-align:right; max-width: 200px;" value="${amount ?? ''}" placeholder="0"></td>
-        <td><button type="button" class="btn btn-ghost btn-sm row-del">✕</button></td>
+        <td style="display:flex; gap:0.3rem;">
+          <button type="button" class="btn btn-ghost btn-sm copy-prev-income" title="前月の値をコピー">前月</button>
+          <button type="button" class="btn btn-ghost btn-sm row-del" title="削除">✕</button>
+        </td>
       `;
       tr.querySelector('.row-del').addEventListener('click', () => tr.remove());
+      tr.querySelector('.copy-prev-income').addEventListener('click', () => copyPrevIncome(tr));
       document.getElementById('income-tbody').appendChild(tr);
+    }
+
+    function copyPrevIncome(tr) {
+      const earner = tr.querySelector('.inc-earner').value || '';
+      const category = tr.querySelector('.inc-cat').value;
+      const key = `${earner}|${category}`;
+      const prev = prevIncomeMap.get(key);
+      if (prev) {
+        tr.querySelector('.inc-amount').value = Math.round(Number(prev.amount));
+      } else {
+        toast('前月のデータがありません', 'warn');
+      }
     }
 
     document.getElementById('add-income-btn').addEventListener('click', () => addIncomeRow({ category: '給与', earner_member_id: null, amount: '' }));
@@ -321,6 +437,7 @@
         const tr = document.createElement('tr');
         tr.classList.add('expense-row');
         tr.dataset.memberId = t.id ?? '';
+        tr.dataset.payerKey = k;
         tr.innerHTML = `
           <td>
             <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${escapeHtml(t.color || '#94a3b8')}; vertical-align:middle; margin-right:0.4rem;"></span>
@@ -329,9 +446,25 @@
           <td class="num">
             <input type="number" inputmode="numeric" class="form-input exp-amount" style="text-align:right; max-width: 200px;" value="${amount}" placeholder="0">
           </td>
+          <td>
+            <button type="button" class="btn btn-ghost btn-sm copy-prev-expense" title="前月の値をコピー">前月</button>
+          </td>
         `;
         tbody.appendChild(tr);
       }
+      // 前月コピーボタン
+      tbody.querySelectorAll('.copy-prev-expense').forEach(b => {
+        b.addEventListener('click', () => {
+          const tr = b.closest('tr');
+          const key = tr.dataset.payerKey;
+          const prevAmount = prevExpenseMap.get(key);
+          if (prevAmount != null) {
+            tr.querySelector('.exp-amount').value = prevAmount;
+          } else {
+            toast('前月のデータがありません', 'warn');
+          }
+        });
+      });
     }
 
     // =========== 保存 ===========

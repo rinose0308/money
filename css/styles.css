@@ -141,6 +141,17 @@ a:hover { text-decoration: underline; }
   background: var(--bg-card);
   font-family: inherit;
 }
+
+/* number 入力のスピナー(上下矢印)を削除 */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
 .form-input:focus, .form-select:focus {
   outline: 2px solid var(--primary);
   outline-offset: -1px;
