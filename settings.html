@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <title>設定 | 我が家マネー</title>
   <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
 <body>
   <main class="container">
@@ -24,23 +25,27 @@
             <button id="copy-code-btn" class="btn btn-ghost btn-sm" style="margin-left: 0.5rem;">コピー</button>
           </div>
         </div>
-        <p class="form-help" style="margin-top: 0.75rem;">
-          配偶者にこの招待コードを伝えれば、同じ世帯のデータを共有できます。
-        </p>
       </div>
 
       <!-- 名義(メンバー) -->
       <div class="card" style="margin-bottom: 1rem;">
-        <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">名義(メンバー)管理</h3>
+        <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;">
+          <h3 style="margin: 0; font-size: 1rem;">名義(メンバー)管理</h3>
+          <div style="display:flex; gap: 0.4rem; flex-wrap: wrap;">
+            <button type="button" class="btn btn-ghost btn-sm" id="bulk-add-members-btn">📋 まとめて追加</button>
+            <button type="button" class="btn btn-danger btn-sm" id="bulk-del-members-btn" style="display:none;">選択削除 (<span id="sel-cnt-members">0</span>)</button>
+          </div>
+        </div>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
-          資産・収入・支出を分けて記録するための名義を登録します(例: りょちょ・まちょ)。<br>
-          配偶者がアプリに登録していなくても、こちらに名義として追加できます。
+          ドラッグで並び替えできます。
         </p>
 
         <div class="table-wrap" id="members-wrap" style="display:none;">
           <table class="table">
             <thead>
               <tr>
+                <th style="width:30px;"></th>
+                <th style="width:30px;"><input type="checkbox" id="check-all-members"></th>
                 <th style="width:30px;"></th>
                 <th>名義</th>
                 <th style="width:80px;">色</th>
@@ -65,19 +70,26 @@
       <div class="card" style="margin-bottom: 1rem;">
         <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;">
           <h3 style="margin: 0; font-size: 1rem;">口座マスタ</h3>
-          <button type="button" class="btn btn-ghost btn-sm" id="add-account-btn">＋ 口座を追加</button>
+          <div style="display:flex; gap: 0.4rem; flex-wrap: wrap;">
+            <button type="button" class="btn btn-ghost btn-sm" id="add-account-btn">＋ 口座を追加</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="bulk-add-accounts-btn">📋 まとめて追加</button>
+            <button type="button" class="btn btn-danger btn-sm" id="bulk-del-accounts-btn" style="display:none;">選択非表示 (<span id="sel-cnt-accounts">0</span>)</button>
+          </div>
         </div>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
-          月次入力で扱う口座をここで管理します。月ごとの残高は<a href="/monthly.html">月次入力</a>から登録します。
+          ドラッグで並び替え。残高は<a href="/monthly.html">月次入力</a>から登録します。
         </p>
 
         <div class="table-wrap" id="accounts-wrap" style="display:none;">
           <table class="table">
             <thead>
               <tr>
+                <th style="width:30px;"></th>
+                <th style="width:30px;"><input type="checkbox" id="check-all-accounts"></th>
                 <th>口座名</th>
                 <th>種別</th>
                 <th>主な名義</th>
+                <th>外貨</th>
                 <th></th>
               </tr>
             </thead>
@@ -86,6 +98,42 @@
         </div>
         <div id="accounts-empty" class="empty-state" style="padding: 1rem; display:none;">
           <p style="margin: 0;">口座が未登録です</p>
+        </div>
+      </div>
+
+      <!-- 支出カテゴリマスタ -->
+      <div class="card" style="margin-bottom: 1rem;">
+        <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;">
+          <h3 style="margin: 0; font-size: 1rem;">支出カテゴリ管理</h3>
+          <div style="display:flex; gap: 0.4rem; flex-wrap: wrap;">
+            <button type="button" class="btn btn-ghost btn-sm" id="bulk-add-expcat-btn">📋 まとめて追加</button>
+            <button type="button" class="btn btn-danger btn-sm" id="bulk-del-expcat-btn" style="display:none;">選択削除 (<span id="sel-cnt-expcat">0</span>)</button>
+          </div>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+          ドラッグで並び替え。月次入力の支出セクションに使われます。
+        </p>
+
+        <div class="table-wrap" id="expcat-wrap" style="display:none;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:30px;"></th>
+                <th style="width:30px;"><input type="checkbox" id="check-all-expcat"></th>
+                <th>カテゴリ名</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="expcat-tbody"></tbody>
+          </table>
+        </div>
+        <div id="expcat-empty" class="empty-state" style="padding: 1rem; display:none;">
+          <p style="margin: 0;">まだカテゴリが登録されていません</p>
+        </div>
+
+        <div style="display:flex; gap:0.5rem; margin-top: 0.75rem; flex-wrap: wrap; align-items: center;">
+          <input type="text" id="new-expcat-name" class="form-input" placeholder="例: 食費" maxlength="30" style="max-width: 200px;">
+          <button type="button" class="btn btn-primary btn-sm" id="add-expcat-btn">＋ 追加</button>
         </div>
       </div>
 
@@ -115,7 +163,7 @@
         <input type="hidden" id="account-id">
         <div class="form-group">
           <label class="form-label" for="account-name">口座名 <span style="color:var(--danger)">*</span></label>
-          <input type="text" id="account-name" class="form-input" required maxlength="50" placeholder="例: SBI証券 夫">
+          <input type="text" id="account-name" class="form-input" required maxlength="50" placeholder="例: SBI証券">
         </div>
         <div class="form-group">
           <label class="form-label" for="account-type">種別 <span style="color:var(--danger)">*</span></label>
@@ -134,7 +182,17 @@
           <select id="account-owner" class="form-select">
             <option value="">(共有)</option>
           </select>
-          <p class="form-help">月次入力では各名義の列に金額を入力できます。これは「主に誰の口座か」の参考情報です。</p>
+        </div>
+        <div class="form-group">
+          <label style="display:flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="checkbox" id="account-foreign">
+            <span>外貨建ての口座</span>
+          </label>
+        </div>
+        <div class="form-group" id="currency-code-group" style="display:none;">
+          <label class="form-label" for="account-currency">通貨コード</label>
+          <input type="text" id="account-currency" class="form-input" maxlength="10" placeholder="USD" style="text-transform: uppercase; max-width: 200px;">
+          <p class="form-help">3〜5文字。例: USD, EUR, GBP</p>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="account-cancel">キャンセル</button>
@@ -145,13 +203,28 @@
     </div>
   </div>
 
+  <!-- まとめて追加モーダル(汎用) -->
+  <div id="bulk-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+      <h2 class="modal-title" id="bulk-modal-title">まとめて追加</h2>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0 0 0.5rem;" id="bulk-modal-desc">1行に1つ、改行で区切って入力してください。</p>
+      <textarea id="bulk-modal-textarea" class="form-input" rows="8" style="font-family: monospace;"></textarea>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="bulk-modal-cancel">キャンセル</button>
+        <button type="button" class="btn btn-primary" id="bulk-modal-add">追加する</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module">
     import { requireAuth } from '/js/supabase.js';
     import { renderNav } from '/js/nav.js';
     import {
       updateHousehold,
-      listMembers, createMember, updateMember, deleteMember,
-      listAccounts, createAccount, updateAccount, deactivateAccount,
+      listMembers, createMember, updateMember, deleteMember, bulkCreateMembers, bulkDeleteMembers,
+      listAccounts, createAccount, updateAccount, deactivateAccount, bulkCreateAccounts, bulkDeactivateAccounts,
+      listExpenseCategories, createExpenseCategory, updateExpenseCategory, deleteExpenseCategory,
+      bulkCreateExpenseCategories, bulkDeleteExpenseCategories,
     } from '/js/api.js';
     import { toast, withErrorToast, formatYen, formatYenShort } from '/js/utils.js';
 
@@ -164,12 +237,8 @@
     document.getElementById('hh-invite-code').textContent = auth.profile.households.invite_code;
 
     document.getElementById('copy-code-btn').addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(auth.profile.households.invite_code);
-        toast('コピーしました', 'success');
-      } catch {
-        toast('コピーに失敗しました', 'error');
-      }
+      try { await navigator.clipboard.writeText(auth.profile.households.invite_code); toast('コピーしました', 'success'); }
+      catch { toast('コピーに失敗しました', 'error'); }
     });
 
     function escapeHtml(s) {
@@ -183,6 +252,53 @@
 
     let membersCache = [];
     let accountsCache = [];
+    let expcatCache = [];
+
+    // ============ 共通: D&D で並び替え ============
+    function attachSortable(tbody, getCache, updateFn) {
+      Sortable.create(tbody, {
+        animation: 150,
+        handle: '.drag-handle',
+        ghostClass: 'sortable-ghost',
+        chosenClass: 'sortable-chosen',
+        dragClass: 'sortable-drag',
+        onEnd: withErrorToast(async (evt) => {
+          if (evt.oldIndex === evt.newIndex) return;
+          const cache = getCache();
+          const moved = cache.splice(evt.oldIndex, 1)[0];
+          cache.splice(evt.newIndex, 0, moved);
+          // 順序を保存
+          for (let i = 0; i < cache.length; i++) {
+            if (cache[i].display_order !== i) {
+              await updateFn(cache[i].id, { display_order: i });
+              cache[i].display_order = i;
+            }
+          }
+        }),
+      });
+    }
+
+    // ============ 共通: 一括追加モーダル ============
+    const bulkModal = document.getElementById('bulk-modal');
+    const bulkTextarea = document.getElementById('bulk-modal-textarea');
+    let bulkOnAdd = null;
+    function openBulkModal({ title, desc, placeholder, onAdd }) {
+      document.getElementById('bulk-modal-title').textContent = title;
+      document.getElementById('bulk-modal-desc').textContent = desc;
+      bulkTextarea.placeholder = placeholder ?? '';
+      bulkTextarea.value = '';
+      bulkOnAdd = onAdd;
+      bulkModal.style.display = 'flex';
+      setTimeout(() => bulkTextarea.focus(), 50);
+    }
+    document.getElementById('bulk-modal-cancel').addEventListener('click', () => bulkModal.style.display = 'none');
+    bulkModal.addEventListener('click', e => { if (e.target === bulkModal) bulkModal.style.display = 'none'; });
+    document.getElementById('bulk-modal-add').addEventListener('click', withErrorToast(async () => {
+      const lines = bulkTextarea.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      if (lines.length === 0) { toast('1行以上入力してください', 'warn'); return; }
+      await bulkOnAdd(lines);
+      bulkModal.style.display = 'none';
+    }));
 
     // ============ 名義(メンバー) ============
     async function refreshMembers() {
@@ -190,17 +306,15 @@
       const tbody = document.getElementById('members-tbody');
       const wrap = document.getElementById('members-wrap');
       const empty = document.getElementById('members-empty');
-      if (membersCache.length === 0) {
-        wrap.style.display = 'none';
-        empty.style.display = 'block';
-        return;
-      }
-      wrap.style.display = 'block';
-      empty.style.display = 'none';
+      if (membersCache.length === 0) { wrap.style.display = 'none'; empty.style.display = 'block'; updateMembersBulkUI(); return; }
+      wrap.style.display = 'block'; empty.style.display = 'none';
       tbody.innerHTML = '';
       for (const m of membersCache) {
         const tr = document.createElement('tr');
+        tr.dataset.id = m.id;
         tr.innerHTML = `
+          <td><span class="drag-handle" title="ドラッグで並び替え">⋮⋮</span></td>
+          <td><input type="checkbox" class="row-check" data-id="${m.id}"></td>
           <td><span style="display:inline-block; width:14px; height:14px; border-radius:50%; background:${escapeHtml(m.color || '#3b82f6')};"></span></td>
           <td><input type="text" class="form-input mem-name" data-id="${m.id}" value="${escapeHtml(m.name)}" maxlength="20" style="max-width: 200px;"></td>
           <td><input type="color" class="mem-color" data-id="${m.id}" value="${escapeHtml(m.color || '#3b82f6')}" style="width:50px; height:32px; padding:2px; border:1px solid var(--border); border-radius:0.4rem; cursor:pointer;"></td>
@@ -218,19 +332,31 @@
         if (!name) { toast('名前を入力してください', 'error'); return; }
         await updateMember(id, { name, color });
         toast('更新しました', 'success');
-        await refreshMembers();
-        await refreshAccounts();
+        await refreshMembers(); await refreshAccounts();
       })));
       tbody.querySelectorAll('.del-mem').forEach(b => b.addEventListener('click', withErrorToast(async () => {
         const id = b.dataset.id;
         if (!confirm('この名義を削除しますか?\n紐付いた口座/収入/支出のリンクは外れますが、データ自体は残ります。')) return;
-        await deleteMember(id);
-        toast('削除しました', 'success');
-        await refreshMembers();
-        await refreshAccounts();
+        await deleteMember(id); toast('削除しました', 'success');
+        await refreshMembers(); await refreshAccounts();
       })));
+      tbody.querySelectorAll('.row-check').forEach(c => c.addEventListener('change', updateMembersBulkUI));
+      attachSortable(tbody, () => membersCache, updateMember);
+      updateMembersBulkUI();
     }
-
+    function updateMembersBulkUI() {
+      const checked = document.querySelectorAll('#members-tbody .row-check:checked');
+      const btn = document.getElementById('bulk-del-members-btn');
+      btn.style.display = checked.length > 0 ? 'inline-flex' : 'none';
+      document.getElementById('sel-cnt-members').textContent = checked.length;
+      const all = document.getElementById('check-all-members');
+      const total = document.querySelectorAll('#members-tbody .row-check').length;
+      if (all) all.checked = checked.length === total && total > 0;
+    }
+    document.getElementById('check-all-members').addEventListener('change', e => {
+      document.querySelectorAll('#members-tbody .row-check').forEach(c => c.checked = e.target.checked);
+      updateMembersBulkUI();
+    });
     document.getElementById('add-member-btn').addEventListener('click', withErrorToast(async () => {
       const name = document.getElementById('new-member-name').value.trim();
       const color = document.getElementById('new-member-color').value;
@@ -238,8 +364,27 @@
       await createMember({ name, color });
       document.getElementById('new-member-name').value = '';
       toast('追加しました', 'success');
-      await refreshMembers();
-      await refreshAccounts();
+      await refreshMembers(); await refreshAccounts();
+    }));
+    document.getElementById('bulk-add-members-btn').addEventListener('click', () => {
+      openBulkModal({
+        title: '名義をまとめて追加',
+        desc: '1行に1つの名前を入力してください。色はあとから個別に変更できます。',
+        placeholder: 'りょちょ\nまちょ',
+        onAdd: async (names) => {
+          const inserted = await bulkCreateMembers(names);
+          toast(`${inserted.length}件追加しました`, 'success');
+          await refreshMembers(); await refreshAccounts();
+        },
+      });
+    });
+    document.getElementById('bulk-del-members-btn').addEventListener('click', withErrorToast(async () => {
+      const ids = Array.from(document.querySelectorAll('#members-tbody .row-check:checked')).map(c => c.dataset.id);
+      if (ids.length === 0) return;
+      if (!confirm(`${ids.length}件の名義を削除しますか?`)) return;
+      await bulkDeleteMembers(ids);
+      toast('削除しました', 'success');
+      await refreshMembers(); await refreshAccounts();
     }));
 
     // ============ 口座マスタ ============
@@ -248,36 +393,55 @@
       const wrap = document.getElementById('accounts-wrap');
       const empty = document.getElementById('accounts-empty');
       const tbody = document.getElementById('accounts-tbody');
-      if (accountsCache.length === 0) {
-        wrap.style.display = 'none';
-        empty.style.display = 'block';
-        return;
-      }
-      wrap.style.display = 'block';
-      empty.style.display = 'none';
+      if (accountsCache.length === 0) { wrap.style.display = 'none'; empty.style.display = 'block'; updateAccountsBulkUI(); return; }
+      wrap.style.display = 'block'; empty.style.display = 'none';
       tbody.innerHTML = '';
       for (const acc of accountsCache) {
         const member = acc.owner_member_id ? membersCache.find(m => m.id === acc.owner_member_id) : null;
         const ownerLabel = member
           ? `<span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${escapeHtml(member.color || '#3b82f6')}; vertical-align:middle; margin-right:0.3rem;"></span>${escapeHtml(member.name)}`
           : '<span style="color: var(--text-muted);">共有</span>';
+        const fxLabel = acc.is_foreign_currency
+          ? `<span class="badge" style="background:#fef3c7;color:#92400e;">${escapeHtml(acc.currency_code || 'FX')}</span>`
+          : '—';
         const tr = document.createElement('tr');
+        tr.dataset.id = acc.id;
         tr.innerHTML = `
+          <td><span class="drag-handle" title="ドラッグで並び替え">⋮⋮</span></td>
+          <td><input type="checkbox" class="row-check" data-id="${acc.id}"></td>
           <td style="font-weight:500;">${escapeHtml(acc.name)}</td>
           <td><span class="badge ${acc.account_type}">${TYPE_LABELS[acc.account_type] ?? acc.account_type}</span></td>
           <td>${ownerLabel}</td>
+          <td>${fxLabel}</td>
           <td><button type="button" class="btn btn-ghost btn-sm edit-acc" data-id="${acc.id}">編集</button></td>
         `;
         tbody.appendChild(tr);
       }
-      tbody.querySelectorAll('.edit-acc').forEach(b => {
-        b.addEventListener('click', () => openAccountModal(b.dataset.id));
-      });
+      tbody.querySelectorAll('.edit-acc').forEach(b => b.addEventListener('click', () => openAccountModal(b.dataset.id)));
+      tbody.querySelectorAll('.row-check').forEach(c => c.addEventListener('change', updateAccountsBulkUI));
+      attachSortable(tbody, () => accountsCache, updateAccount);
+      updateAccountsBulkUI();
     }
+    function updateAccountsBulkUI() {
+      const checked = document.querySelectorAll('#accounts-tbody .row-check:checked');
+      const btn = document.getElementById('bulk-del-accounts-btn');
+      btn.style.display = checked.length > 0 ? 'inline-flex' : 'none';
+      document.getElementById('sel-cnt-accounts').textContent = checked.length;
+      const all = document.getElementById('check-all-accounts');
+      const total = document.querySelectorAll('#accounts-tbody .row-check').length;
+      if (all) all.checked = checked.length === total && total > 0;
+    }
+    document.getElementById('check-all-accounts').addEventListener('change', e => {
+      document.querySelectorAll('#accounts-tbody .row-check').forEach(c => c.checked = e.target.checked);
+      updateAccountsBulkUI();
+    });
 
     // 口座 追加/編集 モーダル
     const accountModal = document.getElementById('account-modal');
     const accountForm = document.getElementById('account-form');
+    document.getElementById('account-foreign').addEventListener('change', (e) => {
+      document.getElementById('currency-code-group').style.display = e.target.checked ? 'block' : 'none';
+    });
 
     function openAccountModal(id = null) {
       const acc = id ? accountsCache.find(a => a.id === id) : null;
@@ -289,6 +453,9 @@
       ownerSel.innerHTML = '<option value="">(共有)</option>' +
         membersCache.filter(m => m.is_active).map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
       ownerSel.value = acc?.owner_member_id ?? '';
+      document.getElementById('account-foreign').checked = !!acc?.is_foreign_currency;
+      document.getElementById('account-currency').value = acc?.currency_code ?? '';
+      document.getElementById('currency-code-group').style.display = acc?.is_foreign_currency ? 'block' : 'none';
       document.getElementById('account-deactivate').style.display = acc ? 'inline-flex' : 'none';
       accountModal.style.display = 'flex';
     }
@@ -296,7 +463,7 @@
 
     document.getElementById('add-account-btn').addEventListener('click', () => openAccountModal());
     document.getElementById('account-cancel').addEventListener('click', closeAccountModal);
-    accountModal.addEventListener('click', (e) => { if (e.target === accountModal) closeAccountModal(); });
+    accountModal.addEventListener('click', e => { if (e.target === accountModal) closeAccountModal(); });
 
     accountForm.addEventListener('submit', withErrorToast(async (e) => {
       e.preventDefault();
@@ -304,12 +471,16 @@
       const name = document.getElementById('account-name').value.trim();
       const account_type = document.getElementById('account-type').value;
       const owner_member_id = document.getElementById('account-owner').value || null;
+      const is_foreign_currency = document.getElementById('account-foreign').checked;
+      const currency_code = is_foreign_currency
+        ? (document.getElementById('account-currency').value.trim().toUpperCase() || 'USD')
+        : null;
       if (!name) return;
       if (id) {
-        await updateAccount(id, { name, account_type, owner_member_id });
+        await updateAccount(id, { name, account_type, owner_member_id, is_foreign_currency, currency_code });
         toast('口座を更新しました', 'success');
       } else {
-        await createAccount({ name, account_type, owner_member_id });
+        await createAccount({ name, account_type, owner_member_id, is_foreign_currency, currency_code });
         toast('口座を追加しました', 'success');
       }
       closeAccountModal();
@@ -326,6 +497,108 @@
       await refreshAccounts();
     }));
 
+    document.getElementById('bulk-add-accounts-btn').addEventListener('click', () => {
+      openBulkModal({
+        title: '口座をまとめて追加',
+        desc: '1行に1つの口座名を入力してください。種別はすべて「預貯金」、名義は「共有」になります。あとから個別に変更できます。',
+        placeholder: 'りょちょ 楽天銀行\nまちょ ゆうちょ\n共通 SBI銀行',
+        onAdd: async (names) => {
+          const inserted = await bulkCreateAccounts(names);
+          toast(`${inserted.length}件追加しました`, 'success');
+          await refreshAccounts();
+        },
+      });
+    });
+    document.getElementById('bulk-del-accounts-btn').addEventListener('click', withErrorToast(async () => {
+      const ids = Array.from(document.querySelectorAll('#accounts-tbody .row-check:checked')).map(c => c.dataset.id);
+      if (ids.length === 0) return;
+      if (!confirm(`${ids.length}件の口座を非表示にしますか?\n(過去のデータは残ります)`)) return;
+      await bulkDeactivateAccounts(ids);
+      toast('非表示にしました', 'success');
+      await refreshAccounts();
+    }));
+
+    // ============ 支出カテゴリマスタ ============
+    async function refreshExpcat() {
+      expcatCache = await listExpenseCategories({ includeInactive: true });
+      const wrap = document.getElementById('expcat-wrap');
+      const empty = document.getElementById('expcat-empty');
+      const tbody = document.getElementById('expcat-tbody');
+      if (expcatCache.length === 0) { wrap.style.display = 'none'; empty.style.display = 'block'; updateExpcatBulkUI(); return; }
+      wrap.style.display = 'block'; empty.style.display = 'none';
+      tbody.innerHTML = '';
+      for (const c of expcatCache) {
+        const tr = document.createElement('tr');
+        tr.dataset.id = c.id;
+        tr.innerHTML = `
+          <td><span class="drag-handle" title="ドラッグで並び替え">⋮⋮</span></td>
+          <td><input type="checkbox" class="row-check" data-id="${c.id}"></td>
+          <td><input type="text" class="form-input expcat-name" data-id="${c.id}" value="${escapeHtml(c.name)}" maxlength="30" style="max-width: 250px;"></td>
+          <td style="display:flex; gap:0.3rem;">
+            <button type="button" class="btn btn-ghost btn-sm save-expcat" data-id="${c.id}">保存</button>
+            <button type="button" class="btn btn-danger btn-sm del-expcat" data-id="${c.id}">削除</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+      tbody.querySelectorAll('.save-expcat').forEach(b => b.addEventListener('click', withErrorToast(async () => {
+        const id = b.dataset.id;
+        const name = tbody.querySelector(`.expcat-name[data-id="${id}"]`).value.trim();
+        if (!name) { toast('名前を入力してください', 'error'); return; }
+        await updateExpenseCategory(id, { name });
+        toast('更新しました', 'success'); await refreshExpcat();
+      })));
+      tbody.querySelectorAll('.del-expcat').forEach(b => b.addEventListener('click', withErrorToast(async () => {
+        const id = b.dataset.id;
+        if (!confirm('このカテゴリを削除しますか?')) return;
+        await deleteExpenseCategory(id);
+        toast('削除しました', 'success'); await refreshExpcat();
+      })));
+      tbody.querySelectorAll('.row-check').forEach(c => c.addEventListener('change', updateExpcatBulkUI));
+      attachSortable(tbody, () => expcatCache, updateExpenseCategory);
+      updateExpcatBulkUI();
+    }
+    function updateExpcatBulkUI() {
+      const checked = document.querySelectorAll('#expcat-tbody .row-check:checked');
+      const btn = document.getElementById('bulk-del-expcat-btn');
+      btn.style.display = checked.length > 0 ? 'inline-flex' : 'none';
+      document.getElementById('sel-cnt-expcat').textContent = checked.length;
+      const all = document.getElementById('check-all-expcat');
+      const total = document.querySelectorAll('#expcat-tbody .row-check').length;
+      if (all) all.checked = checked.length === total && total > 0;
+    }
+    document.getElementById('check-all-expcat').addEventListener('change', e => {
+      document.querySelectorAll('#expcat-tbody .row-check').forEach(c => c.checked = e.target.checked);
+      updateExpcatBulkUI();
+    });
+    document.getElementById('add-expcat-btn').addEventListener('click', withErrorToast(async () => {
+      const name = document.getElementById('new-expcat-name').value.trim();
+      if (!name) { toast('カテゴリ名を入力してください', 'error'); return; }
+      const next = (expcatCache[expcatCache.length - 1]?.display_order ?? -1) + 1;
+      await createExpenseCategory({ name, display_order: next });
+      document.getElementById('new-expcat-name').value = '';
+      toast('追加しました', 'success'); await refreshExpcat();
+    }));
+    document.getElementById('bulk-add-expcat-btn').addEventListener('click', () => {
+      openBulkModal({
+        title: 'カテゴリをまとめて追加',
+        desc: '1行に1つのカテゴリ名を入力してください。',
+        placeholder: '食費\n住居\n水道光熱費\n通信費\n交通費\n娯楽\n日用品\n医療費',
+        onAdd: async (names) => {
+          const inserted = await bulkCreateExpenseCategories(names);
+          toast(`${inserted.length}件追加しました`, 'success');
+          await refreshExpcat();
+        },
+      });
+    });
+    document.getElementById('bulk-del-expcat-btn').addEventListener('click', withErrorToast(async () => {
+      const ids = Array.from(document.querySelectorAll('#expcat-tbody .row-check:checked')).map(c => c.dataset.id);
+      if (ids.length === 0) return;
+      if (!confirm(`${ids.length}件のカテゴリを削除しますか?`)) return;
+      await bulkDeleteExpenseCategories(ids);
+      toast('削除しました', 'success'); await refreshExpcat();
+    }));
+
     // ============ 目標額 ============
     const targetInput = document.getElementById('target-amount');
     const targetHelper = document.getElementById('target-helper');
@@ -340,30 +613,22 @@
       const v = parseInt(targetInput.value, 10);
       targetHelper.textContent = isNaN(v) ? '未設定' : `${formatYen(v)} (${formatYenShort(v)})`;
     });
-
     document.getElementById('target-form').addEventListener('submit', withErrorToast(async (e) => {
       e.preventDefault();
       const raw = targetInput.value.trim();
       const amount = raw === '' ? null : parseInt(raw, 10);
-      if (raw !== '' && (isNaN(amount) || amount < 0)) {
-        toast('正しい金額を入力してください', 'error');
-        return;
-      }
+      if (raw !== '' && (isNaN(amount) || amount < 0)) { toast('正しい金額を入力してください', 'error'); return; }
       const btn = document.getElementById('target-save');
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner"></span> 保存中...';
-      await updateHousehold({
-        householdId: auth.profile.household_id,
-        updates: { target_total_amount: amount },
-      });
-      btn.disabled = false;
-      btn.textContent = '保存';
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 保存中...';
+      await updateHousehold({ householdId: auth.profile.household_id, updates: { target_total_amount: amount } });
+      btn.disabled = false; btn.textContent = '保存';
       toast('目標額を保存しました', 'success');
     }));
 
     // 初期表示
     await refreshMembers();
     await refreshAccounts();
+    await refreshExpcat();
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';

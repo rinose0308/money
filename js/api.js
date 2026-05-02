@@ -53,7 +53,7 @@ export async function deleteMember(id) {
 export async function listAccounts({ includeInactive = false } = {}) {
   let q = supabase
     .from('accounts')
-    .select('id, name, account_type, owner_profile_id, owner_member_id, display_order, is_active, created_at')
+    .select('id, name, account_type, owner_profile_id, owner_member_id, display_order, is_active, is_foreign_currency, currency_code, created_at')
     .order('display_order', { ascending: true })
     .order('created_at', { ascending: true });
 
@@ -64,7 +64,7 @@ export async function listAccounts({ includeInactive = false } = {}) {
   return data ?? [];
 }
 
-export async function createAccount({ name, account_type, owner_member_id = null, display_order = 0 }) {
+export async function createAccount({ name, account_type, owner_member_id = null, display_order = 0, is_foreign_currency = false, currency_code = null }) {
   const profile = await getMyProfile();
   if (!profile) throw new Error('プロファイルが見つかりません');
 
@@ -76,12 +76,72 @@ export async function createAccount({ name, account_type, owner_member_id = null
       account_type,
       owner_member_id,
       display_order,
+      is_foreign_currency,
+      currency_code,
     })
     .select()
     .single();
 
   if (error) throw error;
   return data;
+}
+
+// 一括: 名義リスト
+export async function bulkCreateMembers(names, { defaultColor = '#3b82f6' } = {}) {
+  const profile = await getMyProfile();
+  if (!profile) throw new Error('プロファイルが見つかりません');
+  if (names.length === 0) return [];
+  // 既存の最大display_orderの次から
+  const existing = await listMembers({ includeInactive: true });
+  const startOrder = (existing[existing.length - 1]?.display_order ?? -1) + 1;
+  const rows = names.map((name, idx) => ({
+    household_id: profile.household_id,
+    name,
+    color: defaultColor,
+    display_order: startOrder + idx,
+  }));
+  const { data, error } = await supabase.from('household_members').insert(rows).select();
+  if (error) throw error;
+  return data ?? [];
+}
+
+// 一括: 口座 (名前のみ。typeはbank、その他はデフォルト)
+export async function bulkCreateAccounts(specs) {
+  // specs: [{ name, account_type?, owner_member_id?, is_foreign_currency?, currency_code? }] か string[]
+  const profile = await getMyProfile();
+  if (!profile) throw new Error('プロファイルが見つかりません');
+  if (specs.length === 0) return [];
+  const existing = await listAccounts({ includeInactive: true });
+  const startOrder = (existing[existing.length - 1]?.display_order ?? -1) + 1;
+  const rows = specs.map((s, idx) => {
+    const obj = typeof s === 'string' ? { name: s } : s;
+    return {
+      household_id: profile.household_id,
+      name: obj.name,
+      account_type: obj.account_type ?? 'bank',
+      owner_member_id: obj.owner_member_id ?? null,
+      is_foreign_currency: obj.is_foreign_currency ?? false,
+      currency_code: obj.currency_code ?? null,
+      display_order: startOrder + idx,
+    };
+  });
+  const { data, error } = await supabase.from('accounts').insert(rows).select();
+  if (error) throw error;
+  return data ?? [];
+}
+
+// 一括: 名義削除 (ハードDelete: 関連レコードのリンクは外れる)
+export async function bulkDeleteMembers(ids) {
+  if (ids.length === 0) return;
+  const { error } = await supabase.from('household_members').delete().in('id', ids);
+  if (error) throw error;
+}
+
+// 一括: 口座非表示化 (softDelete)
+export async function bulkDeactivateAccounts(ids) {
+  if (ids.length === 0) return;
+  const { error } = await supabase.from('accounts').update({ is_active: false }).in('id', ids);
+  if (error) throw error;
 }
 
 export async function updateAccount(id, updates) {
@@ -106,7 +166,7 @@ export async function deactivateAccount(id) {
 export async function listSnapshots({ accountId = null, fromDate = null, toDate = null } = {}) {
   let q = supabase
     .from('asset_snapshots')
-    .select('id, account_id, snapshot_date, member_id, balance, unrealized_pnl, source, note')
+    .select('id, account_id, snapshot_date, member_id, balance, foreign_amount, exchange_rate, unrealized_pnl, source, note')
     .order('snapshot_date', { ascending: true });
 
   if (accountId) q = q.eq('account_id', accountId);
@@ -137,11 +197,10 @@ export async function upsertSnapshot({ account_id, snapshot_date, member_id = nu
 }
 
 // 月次入力: 1つの口座について「その月の全スナップショットを置換」する
-// rows: [{ member_id (null可), balance, unrealized_pnl?, note? }]
+// rows: [{ member_id (null可), balance, foreign_amount?, exchange_rate?, unrealized_pnl?, note? }]
 export async function replaceAccountMonthSnapshots({ account_id, year, month, rows, source = 'manual' }) {
   const date = monthEndDate(year, month);
 
-  // この (account_id, date) の全スナップショットを削除
   const { error: delErr } = await supabase
     .from('asset_snapshots')
     .delete()
@@ -158,6 +217,8 @@ export async function replaceAccountMonthSnapshots({ account_id, year, month, ro
       snapshot_date: date,
       member_id: r.member_id ?? null,
       balance: r.balance,
+      foreign_amount: r.foreign_amount ?? null,
+      exchange_rate: r.exchange_rate ?? null,
       unrealized_pnl: r.unrealized_pnl ?? null,
       note: r.note ?? null,
       source,
@@ -165,6 +226,69 @@ export async function replaceAccountMonthSnapshots({ account_id, year, month, ro
     .select();
   if (error) throw error;
   return data ?? [];
+}
+
+// ============================================================
+// 支出カテゴリマスタ (expense_categories)
+// ============================================================
+export async function listExpenseCategories({ includeInactive = false } = {}) {
+  let q = supabase
+    .from('expense_categories')
+    .select('id, name, display_order, is_active')
+    .order('display_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (!includeInactive) q = q.eq('is_active', true);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function createExpenseCategory({ name, display_order = 0 }) {
+  const profile = await getMyProfile();
+  if (!profile) throw new Error('プロファイルが見つかりません');
+  const { data, error } = await supabase
+    .from('expense_categories')
+    .insert({ household_id: profile.household_id, name, display_order })
+    .select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateExpenseCategory(id, updates) {
+  const { data, error } = await supabase
+    .from('expense_categories')
+    .update(updates)
+    .eq('id', id)
+    .select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteExpenseCategory(id) {
+  const { error } = await supabase.from('expense_categories').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function bulkCreateExpenseCategories(names) {
+  const profile = await getMyProfile();
+  if (!profile) throw new Error('プロファイルが見つかりません');
+  if (names.length === 0) return [];
+  const existing = await listExpenseCategories({ includeInactive: true });
+  const startOrder = (existing[existing.length - 1]?.display_order ?? -1) + 1;
+  const rows = names.map((name, idx) => ({
+    household_id: profile.household_id,
+    name,
+    display_order: startOrder + idx,
+  }));
+  const { data, error } = await supabase.from('expense_categories').insert(rows).select();
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function bulkDeleteExpenseCategories(ids) {
+  if (ids.length === 0) return;
+  const { error } = await supabase.from('expense_categories').delete().in('id', ids);
+  if (error) throw error;
 }
 
 // 月次の月末日 (snapshot_dateの規約と統一)

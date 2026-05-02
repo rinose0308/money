@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <title>月次入力 | 我が家マネー</title>
   <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
 <body>
   <main class="container">
@@ -36,7 +37,7 @@
         <div class="card" style="margin-bottom: 1rem;">
           <h3 style="margin: 0 0 0.5rem; font-size: 1.05rem;">資産残高 (月末)</h3>
           <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
-            各口座について、名義ごとに月末残高を入力してください。空欄の名義は保存されません。
+            ⋮⋮を掴んで並び替え。外貨口座は外貨額×レート。<a href="/settings.html">設定</a>で口座を追加・編集できます。
           </p>
           <div class="table-wrap" id="assets-table-wrap" style="display:none;">
             <table class="table">
@@ -74,17 +75,21 @@
 
         <!-- 支出 -->
         <div class="card" style="margin-bottom: 1rem;">
-          <h3 style="margin: 0 0 0.5rem; font-size: 1.05rem;">支出 (名義ごとの月合計)</h3>
-          <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
-            各名義の今月の合計支出額を入力してください。
+          <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <h3 style="margin: 0; font-size: 1.05rem;">支出</h3>
+            <button type="button" class="btn btn-ghost btn-sm" id="add-expense-btn">＋ 行を追加</button>
+          </div>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0.5rem 0 0.75rem;">
+            <a href="/settings.html">支出カテゴリ</a>を登録すると、デフォルトで全カテゴリの行が出ます。
           </p>
           <div class="table-wrap">
             <table class="table">
               <thead>
                 <tr>
                   <th>名義</th>
-                  <th class="num">月の合計支出 (円)</th>
-                  <th style="width:90px;"></th>
+                  <th>カテゴリ</th>
+                  <th class="num">金額 (円)</th>
+                  <th style="width:120px;"></th>
                 </tr>
               </thead>
               <tbody id="expense-tbody"></tbody>
@@ -108,9 +113,10 @@
       listMembers,
       listIncomes, replaceMonthlyIncomes,
       listMonthlyTransactions, replaceMonthlyTransactions,
+      listExpenseCategories,
       monthEndDate,
     } from '/js/api.js';
-    import { formatYen, lastDayOfMonth, toast, withErrorToast } from '/js/utils.js';
+    import { formatYen, formatYenShort, lastDayOfMonth, toast, withErrorToast } from '/js/utils.js';
 
     const auth = await requireAuth();
     if (!auth) throw new Error('not authenticated');
@@ -120,7 +126,6 @@
       bank: '預貯金', jp_stock: '日本株', foreign_stock: '外国株',
       mutual_fund: '投資信託', insurance: '保険', pension: '年金/共済', other: 'その他',
     };
-
     const DEFAULT_INCOME_CATEGORIES = ['給与', 'ボーナス', '副収入', 'その他'];
 
     function escapeHtml(s) {
@@ -131,7 +136,6 @@
     const monthInput = document.getElementById('target-month');
     const now = new Date();
     monthInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-
     document.getElementById('prev-month').addEventListener('click', () => {
       const [y, m] = monthInput.value.split('-').map(Number);
       const d = new Date(y, m - 2, 1);
@@ -149,9 +153,11 @@
     // =========== ロード処理 ===========
     let accountsCache = [];
     let membersCache = [];
-    let prevSnapMap = new Map();    // (account_id|member_key) => snapshot
-    let prevIncomeMap = new Map();  // (earner_key|category) => income
-    let prevExpenseMap = new Map(); // payer_key => total amount
+    let expcatCache = [];
+    let prevSnapMap = new Map();
+    let prevIncomeMap = new Map();
+    let prevExpenseMap = new Map();   // (payer_key|category) => amount
+    let assetCols = [];
 
     function prevMonthOf(year, month) {
       if (month === 1) return { year: year - 1, month: 12 };
@@ -167,15 +173,14 @@
       const { year: py, month: pm } = prevMonthOf(y, m);
       const prevDateStr = monthEndDate(py, pm);
 
-      [membersCache, accountsCache] = await Promise.all([
+      [membersCache, accountsCache, expcatCache] = await Promise.all([
         listMembers(),
         listAccounts({ includeInactive: false }),
+        listExpenseCategories(),
       ]);
 
-      // 名義未登録時の警告
       document.getElementById('no-members-warn').style.display = membersCache.length === 0 ? 'block' : 'none';
 
-      // 当月 + 前月 のデータを並列取得
       const [snaps, prevSnaps, incomes, prevIncomes, txs, prevTxs] = await Promise.all([
         listSnapshots({ fromDate: dateStr, toDate: dateStr }),
         listSnapshots({ fromDate: prevDateStr, toDate: prevDateStr }),
@@ -185,27 +190,21 @@
         listMonthlyTransactions({ fromDate: prevDateStr, toDate: prevDateStr }),
       ]);
 
-      // 当月 snapshot Map
       const snapMap = new Map();
-      for (const s of snaps) {
-        snapMap.set(`${s.account_id}|${s.member_id ?? 'shared'}`, s);
-      }
-      // 前月 snapshot Map
+      for (const s of snaps) snapMap.set(`${s.account_id}|${s.member_id ?? 'shared'}`, s);
       prevSnapMap = new Map();
-      for (const s of prevSnaps) {
-        prevSnapMap.set(`${s.account_id}|${s.member_id ?? 'shared'}`, s);
-      }
-      // 前月 income Map
+      for (const s of prevSnaps) prevSnapMap.set(`${s.account_id}|${s.member_id ?? 'shared'}`, s);
       prevIncomeMap = new Map();
-      for (const inc of prevIncomes) {
-        prevIncomeMap.set(`${inc.earner_member_id ?? ''}|${inc.category}`, inc);
-      }
-      // 前月 expense Map (payer_member_id => 合計)
+      for (const inc of prevIncomes) prevIncomeMap.set(`${inc.earner_member_id ?? ''}|${inc.category}`, inc);
       prevExpenseMap = new Map();
       for (const tx of prevTxs) {
-        const k = tx.payer_member_id ?? 'shared';
+        const k = `${tx.payer_member_id ?? 'shared'}|${tx.category}`;
         prevExpenseMap.set(k, (prevExpenseMap.get(k) ?? 0) + Math.round(Number(tx.amount)));
       }
+
+      assetCols = membersCache.length === 0
+        ? [{ id: null, name: '残高', color: '#94a3b8' }]
+        : [...membersCache.map(m => ({ id: m.id, name: m.name, color: m.color })), { id: null, name: '共有', color: '#94a3b8' }];
 
       renderAssetsMatrix(snapMap);
       renderIncomes(incomes);
@@ -230,123 +229,174 @@
       wrap.style.display = 'block';
       empty.style.display = 'none';
 
-      const cols = membersCache.length === 0
-        ? [{ id: null, name: '残高', color: '#94a3b8' }]
-        : [...membersCache.map(m => ({ id: m.id, name: m.name, color: m.color })), { id: null, name: '共有', color: '#94a3b8' }];
-
       thead.innerHTML = `
         <tr>
-          <th style="width:60px;">並替</th>
+          <th style="width:30px;"></th>
           <th>口座</th>
           <th>種別</th>
-          ${cols.map(c => `
+          <th class="num" style="width:120px;">レート</th>
+          ${assetCols.map(c => `
             <th class="num">
               <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${escapeHtml(c.color)}; vertical-align:middle; margin-right:0.3rem;"></span>
               ${escapeHtml(c.name)}
             </th>
           `).join('')}
-          <th style="width:90px;"></th>
+          <th style="width:80px;"></th>
         </tr>
       `;
 
       tbody.innerHTML = '';
-      accountsCache.forEach((acc, idx) => {
+      for (const acc of accountsCache) {
         const tr = document.createElement('tr');
         tr.classList.add('asset-row');
         tr.dataset.accountId = acc.id;
+        tr.dataset.foreign = acc.is_foreign_currency ? '1' : '0';
 
-        const cells = cols.map(c => {
+        // レート列 (外貨のみ表示。共通レートをこの行で持つ)
+        const sharedRate = (() => {
+          // この口座について、当月の最初に見つかったsnapshotのrateを使う
+          for (const c of assetCols) {
+            const k = `${acc.id}|${c.id ?? 'shared'}`;
+            const ex = snapMap.get(k);
+            if (ex && ex.exchange_rate != null) return Number(ex.exchange_rate);
+          }
+          return '';
+        })();
+        const rateCell = acc.is_foreign_currency
+          ? `<td class="num fx-rate-cell"><input type="number" step="0.0001" inputmode="decimal" class="form-input fx-rate" data-account-id="${acc.id}" style="text-align:right; max-width: 110px;" value="${sharedRate || ''}" placeholder="例: 150"></td>`
+          : `<td class="num" style="color: var(--text-muted);">—</td>`;
+
+        const cells = assetCols.map(c => {
           const key = `${acc.id}|${c.id ?? 'shared'}`;
           const ex = snapMap.get(key);
-          const v = ex ? Math.round(Number(ex.balance)) : '';
-          return `
-            <td class="num">
-              <input type="number" inputmode="numeric"
-                class="form-input asset-input"
-                data-account-id="${acc.id}"
-                data-member-id="${c.id ?? ''}"
-                style="text-align:right; max-width: 160px;"
-                value="${v}" placeholder="0">
-            </td>
-          `;
+          if (acc.is_foreign_currency) {
+            const fa = ex?.foreign_amount != null ? Number(ex.foreign_amount) : '';
+            const calcInit = (fa !== '' && sharedRate !== '') ? Math.round(fa * sharedRate) : null;
+            return `
+              <td class="num">
+                <div class="fx-cell">
+                  <input type="number" step="0.0001" inputmode="decimal"
+                    class="form-input fx-input fx-amount"
+                    data-account-id="${acc.id}" data-member-id="${c.id ?? ''}"
+                    value="${fa}" placeholder="0">
+                  <span class="fx-result" data-result-for="${acc.id}|${c.id ?? 'shared'}">${calcInit != null ? '= ' + formatYen(calcInit) : ''}</span>
+                </div>
+              </td>
+            `;
+          } else {
+            const v = ex ? Math.round(Number(ex.balance)) : '';
+            return `
+              <td class="num">
+                <input type="number" inputmode="numeric"
+                  class="form-input asset-input"
+                  data-account-id="${acc.id}" data-member-id="${c.id ?? ''}"
+                  style="text-align:right; max-width: 160px;"
+                  value="${v}" placeholder="0">
+              </td>
+            `;
+          }
         }).join('');
 
-        const isFirst = idx === 0;
-        const isLast = idx === accountsCache.length - 1;
+        const accLabel = acc.is_foreign_currency
+          ? `<div style="font-weight:500;">${escapeHtml(acc.name)} <span class="badge" style="background:#fef3c7;color:#92400e;">${escapeHtml(acc.currency_code || 'FX')}</span></div>`
+          : `<div style="font-weight:500;">${escapeHtml(acc.name)}</div>`;
+
         tr.innerHTML = `
-          <td>
-            <div style="display:flex; flex-direction:column; gap:2px;">
-              <button type="button" class="btn btn-ghost btn-sm move-up" data-id="${acc.id}" ${isFirst ? 'disabled' : ''} title="上へ" style="padding:0.1rem 0.4rem; min-height:auto; line-height:1;">▲</button>
-              <button type="button" class="btn btn-ghost btn-sm move-down" data-id="${acc.id}" ${isLast ? 'disabled' : ''} title="下へ" style="padding:0.1rem 0.4rem; min-height:auto; line-height:1;">▼</button>
-            </div>
-          </td>
-          <td><div style="font-weight:500;">${escapeHtml(acc.name)}</div></td>
+          <td><span class="drag-handle" title="ドラッグで並び替え">⋮⋮</span></td>
+          <td>${accLabel}</td>
           <td><span class="badge ${acc.account_type}">${TYPE_LABELS[acc.account_type] ?? acc.account_type}</span></td>
+          ${rateCell}
           ${cells}
-          <td>
-            <button type="button" class="btn btn-ghost btn-sm copy-prev-asset" data-id="${acc.id}" title="前月の値をコピー">前月</button>
-          </td>
+          <td><button type="button" class="btn btn-ghost btn-sm copy-prev-asset" data-id="${acc.id}" title="前月の値をコピー">前月</button></td>
         `;
         tbody.appendChild(tr);
-      });
-
-      tbody.querySelectorAll('.move-up').forEach(b => b.addEventListener('click', () => moveAccount(b.dataset.id, -1)));
-      tbody.querySelectorAll('.move-down').forEach(b => b.addEventListener('click', () => moveAccount(b.dataset.id, +1)));
-      tbody.querySelectorAll('.copy-prev-asset').forEach(b => b.addEventListener('click', () => copyPrevAsset(b.dataset.id)));
-    }
-
-    // 口座の並び替え (display_orderを書き換え)
-    async function moveAccount(accountId, direction) {
-      const idx = accountsCache.findIndex(a => a.id === accountId);
-      if (idx < 0) return;
-      const newIdx = idx + direction;
-      if (newIdx < 0 || newIdx >= accountsCache.length) return;
-
-      // メモリ上の並びを変更
-      const reordered = [...accountsCache];
-      [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
-
-      // 実際の入力値を保持しておく(再描画で消えないように)
-      const inputValues = new Map();
-      document.querySelectorAll('.asset-input').forEach(inp => {
-        inputValues.set(`${inp.dataset.accountId}|${inp.dataset.memberId}`, inp.value);
-      });
-
-      // display_order を順番に書き換え (差があるものだけ)
-      for (let i = 0; i < reordered.length; i++) {
-        if (reordered[i].display_order !== i) {
-          await updateAccount(reordered[i].id, { display_order: i });
-          reordered[i].display_order = i;
-        }
       }
-      accountsCache = reordered;
 
-      // 当月の snapshot は既に取得済みなので、それを再構築
-      // (実際にはloadMonthでもう一度取り直すのが確実)
-      await loadMonth();
-      // 入力中の値を復元
-      document.querySelectorAll('.asset-input').forEach(inp => {
-        const k = `${inp.dataset.accountId}|${inp.dataset.memberId}`;
-        if (inputValues.has(k) && inputValues.get(k) !== '') {
-          inp.value = inputValues.get(k);
+      // 外貨の入力イベント (リアルタイム計算)
+      tbody.querySelectorAll('.fx-amount, .fx-rate').forEach(inp => {
+        inp.addEventListener('input', () => recalcFx(inp.dataset.accountId));
+      });
+      tbody.querySelectorAll('.copy-prev-asset').forEach(b => b.addEventListener('click', () => copyPrevAsset(b.dataset.id)));
+
+      // D&D
+      Sortable.create(tbody, {
+        animation: 150,
+        handle: '.drag-handle',
+        ghostClass: 'sortable-ghost',
+        chosenClass: 'sortable-chosen',
+        dragClass: 'sortable-drag',
+        onEnd: withErrorToast(async (evt) => {
+          if (evt.oldIndex === evt.newIndex) return;
+          const moved = accountsCache.splice(evt.oldIndex, 1)[0];
+          accountsCache.splice(evt.newIndex, 0, moved);
+          // 入力中の値を保持
+          const cached = new Map();
+          tbody.querySelectorAll('.asset-input, .fx-amount, .fx-rate').forEach(inp => {
+            const k = `${inp.dataset.accountId}|${inp.dataset.memberId ?? ''}|${inp.classList.contains('fx-rate') ? 'rate' : 'amount'}`;
+            cached.set(k, inp.value);
+          });
+          for (let i = 0; i < accountsCache.length; i++) {
+            if (accountsCache[i].display_order !== i) {
+              await updateAccount(accountsCache[i].id, { display_order: i });
+              accountsCache[i].display_order = i;
+            }
+          }
+          // 値の復元(再描画なし、現在のDOMをそのまま使うので不要)
+        }),
+      });
+    }
+
+    function recalcFx(accountId) {
+      const tr = document.querySelector(`.asset-row[data-account-id="${accountId}"]`);
+      if (!tr) return;
+      const rateInp = tr.querySelector('.fx-rate');
+      const rate = rateInp ? parseFloat(rateInp.value) : NaN;
+      tr.querySelectorAll('.fx-amount').forEach(inp => {
+        const amt = parseFloat(inp.value);
+        const memberKey = inp.dataset.memberId || 'shared';
+        const result = tr.querySelector(`[data-result-for="${accountId}|${memberKey}"]`);
+        if (!result) return;
+        if (!isNaN(amt) && !isNaN(rate)) {
+          result.textContent = '= ' + formatYen(Math.round(amt * rate));
+        } else {
+          result.textContent = '';
         }
       });
     }
 
-    // 前月の残高をコピー (口座行ごと)
     function copyPrevAsset(accountId) {
       const tr = document.querySelector(`.asset-row[data-account-id="${accountId}"]`);
       if (!tr) return;
+      const isForeign = tr.dataset.foreign === '1';
       let copied = 0;
-      tr.querySelectorAll('.asset-input').forEach(inp => {
-        const memberId = inp.dataset.memberId || null;
-        const key = `${accountId}|${memberId ?? 'shared'}`;
-        const prev = prevSnapMap.get(key);
-        if (prev) {
-          inp.value = Math.round(Number(prev.balance));
-          copied++;
-        }
-      });
+
+      if (isForeign) {
+        // 前月のレート + 各セルの外貨額を復元
+        let lastRate = null;
+        tr.querySelectorAll('.fx-amount').forEach(inp => {
+          const memberId = inp.dataset.memberId || null;
+          const key = `${accountId}|${memberId ?? 'shared'}`;
+          const prev = prevSnapMap.get(key);
+          if (prev?.foreign_amount != null) {
+            inp.value = Number(prev.foreign_amount);
+            copied++;
+          }
+          if (prev?.exchange_rate != null) lastRate = Number(prev.exchange_rate);
+        });
+        const rateInp = tr.querySelector('.fx-rate');
+        if (rateInp && lastRate != null) rateInp.value = lastRate;
+        recalcFx(accountId);
+      } else {
+        tr.querySelectorAll('.asset-input').forEach(inp => {
+          const memberId = inp.dataset.memberId || null;
+          const key = `${accountId}|${memberId ?? 'shared'}`;
+          const prev = prevSnapMap.get(key);
+          if (prev) {
+            inp.value = Math.round(Number(prev.balance));
+            copied++;
+          }
+        });
+      }
       if (copied === 0) toast('前月のデータがありません', 'warn');
     }
 
@@ -355,7 +405,6 @@
       const tbody = document.getElementById('income-tbody');
       tbody.innerHTML = '';
       if (incomes.length === 0) {
-        // デフォルト: 各メンバーに「給与」1行
         if (membersCache.length === 0) {
           addIncomeRow({ category: '給与', earner_member_id: null, amount: '' });
         } else {
@@ -396,20 +445,14 @@
         </td>
       `;
       tr.querySelector('.row-del').addEventListener('click', () => tr.remove());
-      tr.querySelector('.copy-prev-income').addEventListener('click', () => copyPrevIncome(tr));
+      tr.querySelector('.copy-prev-income').addEventListener('click', () => {
+        const earner = tr.querySelector('.inc-earner').value || '';
+        const cat = tr.querySelector('.inc-cat').value;
+        const prev = prevIncomeMap.get(`${earner}|${cat}`);
+        if (prev) tr.querySelector('.inc-amount').value = Math.round(Number(prev.amount));
+        else toast('前月のデータがありません', 'warn');
+      });
       document.getElementById('income-tbody').appendChild(tr);
-    }
-
-    function copyPrevIncome(tr) {
-      const earner = tr.querySelector('.inc-earner').value || '';
-      const category = tr.querySelector('.inc-cat').value;
-      const key = `${earner}|${category}`;
-      const prev = prevIncomeMap.get(key);
-      if (prev) {
-        tr.querySelector('.inc-amount').value = Math.round(Number(prev.amount));
-      } else {
-        toast('前月のデータがありません', 'warn');
-      }
     }
 
     document.getElementById('add-income-btn').addEventListener('click', () => addIncomeRow({ category: '給与', earner_member_id: null, amount: '' }));
@@ -418,102 +461,129 @@
     function renderExpenses(txs) {
       const tbody = document.getElementById('expense-tbody');
       tbody.innerHTML = '';
-      // 既存の payer_member_id ごとの合計
-      const totalByMember = new Map(); // member_id (or 'shared') => amount
-      for (const tx of txs) {
-        const k = tx.payer_member_id ?? 'shared';
-        if (!totalByMember.has(k)) totalByMember.set(k, 0);
-        totalByMember.set(k, totalByMember.get(k) + Math.round(Number(tx.amount)));
-      }
 
-      // 各メンバー + 共有
-      const targets = membersCache.length > 0
-        ? [...membersCache.map(m => ({ id: m.id, name: m.name, color: m.color })), { id: null, name: '共有', color: '#94a3b8' }]
-        : [{ id: null, name: '合計', color: '#94a3b8' }];
-
-      for (const t of targets) {
-        const k = t.id ?? 'shared';
-        const amount = totalByMember.get(k) ?? '';
-        const tr = document.createElement('tr');
-        tr.classList.add('expense-row');
-        tr.dataset.memberId = t.id ?? '';
-        tr.dataset.payerKey = k;
-        tr.innerHTML = `
-          <td>
-            <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${escapeHtml(t.color || '#94a3b8')}; vertical-align:middle; margin-right:0.4rem;"></span>
-            ${escapeHtml(t.name)}
-          </td>
-          <td class="num">
-            <input type="number" inputmode="numeric" class="form-input exp-amount" style="text-align:right; max-width: 200px;" value="${amount}" placeholder="0">
-          </td>
-          <td>
-            <button type="button" class="btn btn-ghost btn-sm copy-prev-expense" title="前月の値をコピー">前月</button>
-          </td>
-        `;
-        tbody.appendChild(tr);
-      }
-      // 前月コピーボタン
-      tbody.querySelectorAll('.copy-prev-expense').forEach(b => {
-        b.addEventListener('click', () => {
-          const tr = b.closest('tr');
-          const key = tr.dataset.payerKey;
-          const prevAmount = prevExpenseMap.get(key);
-          if (prevAmount != null) {
-            tr.querySelector('.exp-amount').value = prevAmount;
-          } else {
-            toast('前月のデータがありません', 'warn');
+      if (txs.length === 0) {
+        // 既存データなし → デフォルト行: 各カテゴリに1行ずつ (名義は空)
+        if (expcatCache.length === 0) {
+          // フォールバック: 1行だけ (名義: 共有, カテゴリ: 合計)
+          addExpenseRow({ category: '合計', payer_member_id: null, amount: '' });
+        } else {
+          for (const c of expcatCache) {
+            addExpenseRow({ category: c.name, payer_member_id: null, amount: '' });
           }
-        });
-      });
+        }
+      } else {
+        for (const tx of txs) {
+          addExpenseRow({
+            category: tx.category,
+            payer_member_id: tx.payer_member_id,
+            amount: Math.round(Number(tx.amount)),
+          });
+        }
+      }
     }
+
+    function addExpenseRow({ category, payer_member_id, amount }) {
+      const tr = document.createElement('tr');
+      tr.classList.add('expense-row');
+
+      // カテゴリは expcatCache + 入力された値も含めて選べるように
+      const catNames = new Set(expcatCache.map(c => c.name));
+      if (category && !catNames.has(category)) catNames.add(category);
+      const catOptions = Array.from(catNames).map(c => `<option value="${escapeHtml(c)}"${c===category?' selected':''}>${escapeHtml(c)}</option>`).join('');
+
+      tr.innerHTML = `
+        <td>
+          <select class="form-select exp-payer" style="min-width: 130px;">
+            <option value="">(共有)</option>
+            ${membersCache.map(m => `<option value="${m.id}"${m.id===payer_member_id?' selected':''}>${escapeHtml(m.name)}</option>`).join('')}
+          </select>
+        </td>
+        <td>
+          <select class="form-select exp-cat" style="min-width: 130px;">
+            ${catOptions || `<option value="${escapeHtml(category ?? '合計')}" selected>${escapeHtml(category ?? '合計')}</option>`}
+          </select>
+        </td>
+        <td class="num"><input type="number" inputmode="numeric" class="form-input exp-amount" style="text-align:right; max-width: 200px;" value="${amount ?? ''}" placeholder="0"></td>
+        <td style="display:flex; gap:0.3rem;">
+          <button type="button" class="btn btn-ghost btn-sm copy-prev-expense" title="前月の値をコピー">前月</button>
+          <button type="button" class="btn btn-ghost btn-sm row-del" title="削除">✕</button>
+        </td>
+      `;
+      tr.querySelector('.row-del').addEventListener('click', () => tr.remove());
+      tr.querySelector('.copy-prev-expense').addEventListener('click', () => {
+        const payer = tr.querySelector('.exp-payer').value || 'shared';
+        const cat = tr.querySelector('.exp-cat').value;
+        const k = `${payer}|${cat}`;
+        const prev = prevExpenseMap.get(k);
+        if (prev != null) tr.querySelector('.exp-amount').value = prev;
+        else toast('前月のデータがありません', 'warn');
+      });
+      document.getElementById('expense-tbody').appendChild(tr);
+    }
+
+    document.getElementById('add-expense-btn').addEventListener('click', () => {
+      const defaultCat = expcatCache[0]?.name ?? '';
+      addExpenseRow({ category: defaultCat, payer_member_id: null, amount: '' });
+    });
 
     // =========== 保存 ===========
     document.getElementById('save-all-btn').addEventListener('click', withErrorToast(async () => {
       const [y, m] = monthInput.value.split('-').map(Number);
-      const dateStr = monthEndDate(y, m);
 
       const btn = document.getElementById('save-all-btn');
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span> 保存中...';
 
       try {
-        // 1. 資産: 各口座について「その月の全スナップショットを置換」
+        // 1. 資産: 各口座につき replace
         let assetAccountsSaved = 0;
         let assetCellsSaved = 0;
-        const accountsToProcess = new Set();
-        // 入力のあった行を抽出
-        const perAccountRows = new Map(); // account_id => [{ member_id, balance }]
+        const perAccount = new Map();
+
         document.querySelectorAll('.asset-row').forEach(tr => {
           const accountId = tr.dataset.accountId;
-          const inputs = tr.querySelectorAll('.asset-input');
-          let anyEntered = false;
+          const isForeign = tr.dataset.foreign === '1';
           const rows = [];
-          inputs.forEach(inp => {
-            const v = inp.value.trim();
-            if (!v) return;
-            const balance = parseInt(v, 10);
-            if (isNaN(balance)) return;
-            anyEntered = true;
-            const memberId = inp.dataset.memberId || null;
-            rows.push({ member_id: memberId, balance });
-          });
-          // この口座について何か入力があった場合のみ「置換」処理
+          let anyEntered = false;
+
+          if (isForeign) {
+            const rateInp = tr.querySelector('.fx-rate');
+            const rate = rateInp ? parseFloat(rateInp.value) : NaN;
+            tr.querySelectorAll('.fx-amount').forEach(inp => {
+              const v = inp.value.trim();
+              if (!v) return;
+              const fa = parseFloat(v);
+              if (isNaN(fa)) return;
+              if (isNaN(rate)) return; // レート未入力なら保存しない
+              anyEntered = true;
+              const memberId = inp.dataset.memberId || null;
+              const balance = Math.round(fa * rate);
+              rows.push({ member_id: memberId, balance, foreign_amount: fa, exchange_rate: rate });
+            });
+          } else {
+            tr.querySelectorAll('.asset-input').forEach(inp => {
+              const v = inp.value.trim();
+              if (!v) return;
+              const balance = parseInt(v, 10);
+              if (isNaN(balance)) return;
+              anyEntered = true;
+              const memberId = inp.dataset.memberId || null;
+              rows.push({ member_id: memberId, balance });
+            });
+          }
           if (anyEntered) {
-            perAccountRows.set(accountId, rows);
+            perAccount.set(accountId, rows);
             assetCellsSaved += rows.length;
           }
         });
-        for (const [accountId, rows] of perAccountRows) {
-          await replaceAccountMonthSnapshots({
-            account_id: accountId,
-            year: y,
-            month: m,
-            rows,
-          });
+
+        for (const [accountId, rows] of perAccount) {
+          await replaceAccountMonthSnapshots({ account_id: accountId, year: y, month: m, rows });
           assetAccountsSaved++;
         }
 
-        // 2. 収入 (delete-then-insert)
+        // 2. 収入
         const incomeRows = [];
         document.querySelectorAll('.income-row').forEach(tr => {
           const earner = tr.querySelector('.inc-earner').value || null;
@@ -526,15 +596,20 @@
         });
         await replaceMonthlyIncomes({ year: y, month: m, rows: incomeRows });
 
-        // 3. 支出 (delete-then-insert, 名義ごとの合計を1件ずつ)
+        // 3. 支出 (カテゴリ × 名義 ごとに1行)
         const expenseRows = [];
+        const seen = new Set();
         document.querySelectorAll('.expense-row').forEach(tr => {
-          const memberId = tr.dataset.memberId || null;
+          const memberId = tr.querySelector('.exp-payer').value || null;
+          const category = tr.querySelector('.exp-cat').value || '合計';
           const amountStr = tr.querySelector('.exp-amount').value.trim();
           if (!amountStr) return;
           const amount = parseInt(amountStr, 10);
           if (isNaN(amount) || amount <= 0) return;
-          expenseRows.push({ category: 'total', amount, payer_member_id: memberId, description: '月合計' });
+          const key = `${memberId ?? 'shared'}|${category}`;
+          if (seen.has(key)) return; // 重複は最初のみ
+          seen.add(key);
+          expenseRows.push({ category, amount, payer_member_id: memberId, description: null });
         });
         await replaceMonthlyTransactions({ year: y, month: m, rows: expenseRows });
 

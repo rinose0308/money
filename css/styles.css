@@ -406,3 +406,27 @@ input[type="number"] {
   background: var(--primary);
   transition: width 0.2s;
 }
+
+/* D&D 並び替え */
+.drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  user-select: none;
+  padding: 0.3rem 0.5rem;
+  font-size: 1rem;
+  display: inline-block;
+}
+.drag-handle:hover { color: var(--text); }
+.drag-handle:active { cursor: grabbing; }
+.sortable-ghost {
+  opacity: 0.4;
+  background: #eff6ff;
+}
+.sortable-chosen { background: #fafbfc; }
+.sortable-drag { background: var(--bg-card); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+
+/* 外貨セル */
+.fx-cell { display: flex; flex-direction: column; gap: 2px; align-items: flex-end; }
+.fx-cell .fx-input { max-width: 130px; padding: 0.4rem 0.5rem; font-size: 0.9rem; text-align: right; }
+.fx-cell .fx-result { font-size: 0.75rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.fx-rate-cell { background: #fff7ed; }
