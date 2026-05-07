@@ -465,7 +465,10 @@ export async function bulkUpsertSnapshots(rows) {
 // ============================================================
 
 // 各 snapshot_date における総資産を集計して返す
-// 戻り値: [{ date: 'YYYY-MM-DD', total: number, byAccount: { accountId: balance } }]
+// 戻り値: [{ date, total, expense, net, byAccount, byType }]
+//   total   = 資産の合計
+//   expense = その月末の支払予定額(monthly_manual)
+//   net     = total - expense (クレカ引き落とし後の実質資産)
 export async function getAssetTrend({ fromDate = null } = {}) {
   const accounts = await listAccounts({ includeInactive: true });
   const accountById = new Map(accounts.map(a => [a.id, a]));
@@ -474,14 +477,32 @@ export async function getAssetTrend({ fromDate = null } = {}) {
   const byDate = new Map();
 
   for (const s of snapshots) {
-    if (!byDate.has(s.snapshot_date)) byDate.set(s.snapshot_date, { date: s.snapshot_date, total: 0, byAccount: {}, byType: {} });
+    if (!byDate.has(s.snapshot_date)) byDate.set(s.snapshot_date, { date: s.snapshot_date, total: 0, expense: 0, net: 0, byAccount: {}, byType: {} });
     const entry = byDate.get(s.snapshot_date);
     const balance = Number(s.balance);
     entry.total += balance;
-    entry.byAccount[s.account_id] = balance;
+    entry.byAccount[s.account_id] = (entry.byAccount[s.account_id] ?? 0) + balance;
 
     const type = accountById.get(s.account_id)?.account_type ?? 'other';
     entry.byType[type] = (entry.byType[type] ?? 0) + balance;
+  }
+
+  // 月次入力の支出 (= 支払予定) を月末日ごとに集計
+  let q = supabase
+    .from('transactions')
+    .select('occurred_on, amount')
+    .eq('source', 'monthly_manual');
+  if (fromDate) q = q.gte('occurred_on', fromDate);
+  const { data: txs, error } = await q;
+  if (error) throw error;
+
+  const expenseByDate = new Map();
+  for (const tx of (txs ?? [])) {
+    expenseByDate.set(tx.occurred_on, (expenseByDate.get(tx.occurred_on) ?? 0) + Number(tx.amount));
+  }
+  for (const entry of byDate.values()) {
+    entry.expense = expenseByDate.get(entry.date) ?? 0;
+    entry.net = entry.total - entry.expense;
   }
 
   return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));

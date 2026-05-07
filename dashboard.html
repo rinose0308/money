@@ -24,9 +24,10 @@
       <!-- メトリクスカード4枚 -->
       <div class="grid cols-4">
         <div class="card">
-          <p class="card-title">総資産</p>
+          <p class="card-title">総資産 (支払予定差引後)</p>
           <p class="card-value" id="metric-total">¥—</p>
           <p class="card-sub" id="metric-total-sub">前月比 —</p>
+          <p class="card-sub" id="metric-total-breakdown" style="font-size: 0.72rem; opacity: 0.7; margin-top: 0.1rem;"></p>
         </div>
         <div class="card">
           <p class="card-title">目標額</p>
@@ -179,25 +180,31 @@
       // メトリクス計算
       const latest = trend[trend.length - 1];
       const prev = trend.length >= 2 ? trend[trend.length - 2] : null;
-      // 前年同月の比較は YYYY-MM 部分で照合(月末日が変わっても確実にマッチ)
-      const latestYM = latest.date.slice(0, 7);                    // 例: "2026-04"
-      const targetYM = `${parseInt(latestYM.slice(0,4),10) - 1}-${latestYM.slice(5)}`; // "2025-04"
+      const latestYM = latest.date.slice(0, 7);
+      const targetYM = `${parseInt(latestYM.slice(0,4),10) - 1}-${latestYM.slice(5)}`;
       const yearAgo = trend.find(t => t.date.slice(0, 7) === targetYM);
 
-      // カード1: 総資産
-      document.getElementById('metric-total').textContent = formatYen(latest.total);
+      // カード1: 総資産 (=net, 支払予定差引後)
+      document.getElementById('metric-total').textContent = formatYen(latest.net);
       if (prev) {
-        const diff = latest.total - prev.total;
-        const pct = prev.total !== 0 ? (diff / prev.total) * 100 : 0;
+        const diff = latest.net - prev.net;
+        const pct = prev.net !== 0 ? (diff / prev.net) * 100 : 0;
         const sub = document.getElementById('metric-total-sub');
         sub.textContent = `前月比 ${diff >= 0 ? '+' : ''}${formatYenShort(diff)} (${formatPercent(pct)})`;
         sub.classList.add(diff >= 0 ? 'up' : 'down');
       } else {
         document.getElementById('metric-total-sub').textContent = '前月データなし';
       }
+      // 内訳 (支出 > 0 のときだけ表示)
+      const breakdown = document.getElementById('metric-total-breakdown');
+      if (latest.expense > 0) {
+        breakdown.textContent = `資産 ${formatYenShort(latest.total)} − 支払予定 ${formatYenShort(latest.expense)}`;
+      } else {
+        breakdown.textContent = '';
+      }
 
-      // カード2/3/4: 目標関連
-      renderTargetCards(latest.total);
+      // カード2/3/4: 目標関連 — net 基準で計算
+      renderTargetCards(latest.net);
 
       // ===== 資産推移グラフ =====
       const chartCtx = document.getElementById('asset-chart').getContext('2d');
@@ -351,19 +358,19 @@
         },
       });
 
-      // ===== 前年同月比 =====
+      // ===== 前年同月比 (net基準) =====
       if (yearAgo) {
-        const yoyDiff = latest.total - yearAgo.total;
-        const yoyPct = yearAgo.total !== 0 ? (yoyDiff / yearAgo.total) * 100 : 0;
+        const yoyDiff = latest.net - yearAgo.net;
+        const yoyPct = yearAgo.net !== 0 ? (yoyDiff / yearAgo.net) * 100 : 0;
         document.getElementById('yoy-comparison').innerHTML = `
           <div style="display: grid; gap: 0.5rem;">
             <div style="display:flex; justify-content: space-between;">
               <span style="color: var(--text-muted);">${yearAgo.date}</span>
-              <span style="font-variant-numeric: tabular-nums;">${formatYen(yearAgo.total)}</span>
+              <span style="font-variant-numeric: tabular-nums;">${formatYen(yearAgo.net)}</span>
             </div>
             <div style="display:flex; justify-content: space-between;">
               <span style="color: var(--text-muted);">${latest.date}</span>
-              <span style="font-variant-numeric: tabular-nums; font-weight:600;">${formatYen(latest.total)}</span>
+              <span style="font-variant-numeric: tabular-nums; font-weight:600;">${formatYen(latest.net)}</span>
             </div>
             <hr style="border:none; border-top:1px solid var(--border); margin: 0.5rem 0;">
             <div style="display:flex; justify-content: space-between;">
