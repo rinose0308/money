@@ -10,8 +10,22 @@
   <main class="container">
     <div id="loading" class="loading"><div class="spinner"></div><p>読み込み中...</p></div>
     <div id="content" style="display:none;">
-      <h1 style="margin: 0 0 1rem; font-size: 1.5rem;">データ取り込み</h1>
+      <h1 style="margin: 0 0 1rem; font-size: 1.5rem;">データ管理</h1>
 
+      <!-- エクスポート -->
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <h2 style="margin: 0 0 0.5rem; font-size: 1.1rem;">📥 過去実績をCSVでエクスポート</h2>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0 0 1rem;">
+          現在の全データをCSVファイルとしてダウンロードします。Excelで開けるUTF-8 BOM付き。
+        </p>
+        <div style="display:flex; gap: 0.5rem; flex-wrap: wrap;">
+          <button type="button" class="btn btn-ghost" id="export-assets-btn">資産履歴 (CSV)</button>
+          <button type="button" class="btn btn-ghost" id="export-incomes-btn">収入履歴 (CSV)</button>
+          <button type="button" class="btn btn-ghost" id="export-expenses-btn">支出履歴 (CSV)</button>
+        </div>
+      </div>
+
+      <h2 style="margin: 0 0 0.5rem; font-size: 1.1rem;">取り込み</h2>
       <div class="tabs">
         <button class="tab-btn active" data-tab="legacy">過去データ (我が家マネーCSV)</button>
         <button class="tab-btn" data-tab="csv">支出CSV</button>
@@ -107,15 +121,120 @@
   <script type="module">
     import { requireAuth } from '/js/supabase.js';
     import { renderNav } from '/js/nav.js';
-    import { listAccounts, createAccount, bulkUpsertSnapshots } from '/js/api.js';
+    import {
+      listAccounts, createAccount, bulkUpsertSnapshots,
+      listSnapshots, listIncomes, listTransactions, listMembers,
+    } from '/js/api.js';
     import { parseLegacyCsv } from '/js/legacy-csv.js';
-    import { toast, withErrorToast } from '/js/utils.js';
+    import { toast, withErrorToast, downloadCsv, todayStamp } from '/js/utils.js';
 
     const auth = await requireAuth();
     if (!auth) throw new Error('not authenticated');
     renderNav('/import.html');
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
+
+    // ============ エクスポート ============
+    const TYPE_LABELS_EXPORT = {
+      bank: '預貯金', jp_stock: '日本株', foreign_stock: '外国株',
+      mutual_fund: '投資信託', insurance: '保険', pension: '年金/共済', other: 'その他',
+    };
+
+    async function loadMastersForExport() {
+      const [accounts, members] = await Promise.all([
+        listAccounts({ includeInactive: true }),
+        listMembers({ includeInactive: true }),
+      ]);
+      const accountById = new Map(accounts.map(a => [a.id, a]));
+      const memberById = new Map(members.map(m => [m.id, m]));
+      return { accountById, memberById };
+    }
+
+    document.getElementById('export-assets-btn').addEventListener('click', withErrorToast(async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true; btn.textContent = '取得中...';
+      try {
+        const { accountById, memberById } = await loadMastersForExport();
+        const snaps = await listSnapshots({});
+        if (snaps.length === 0) { toast('資産データがありません', 'warn'); return; }
+        const headers = ['snapshot_date','account_name','account_type','owner_member','member','currency','balance_jpy','foreign_amount','exchange_rate','source','note'];
+        const rows = snaps
+          .sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date) || (accountById.get(a.account_id)?.display_order ?? 0) - (accountById.get(b.account_id)?.display_order ?? 0))
+          .map(s => {
+            const acc = accountById.get(s.account_id);
+            const member = s.member_id ? memberById.get(s.member_id) : null;
+            const ownerMember = acc?.owner_member_id ? memberById.get(acc.owner_member_id) : null;
+            return [
+              s.snapshot_date,
+              acc?.name ?? '',
+              TYPE_LABELS_EXPORT[acc?.account_type] ?? acc?.account_type ?? '',
+              ownerMember?.name ?? '',
+              member?.name ?? '(共有)',
+              acc?.is_foreign_currency ? (acc.currency_code || '') : 'JPY',
+              Math.round(Number(s.balance)),
+              s.foreign_amount ?? '',
+              s.exchange_rate ?? '',
+              s.source ?? '',
+              s.note ?? '',
+            ];
+          });
+        downloadCsv(`assets_${todayStamp()}.csv`, headers, rows);
+        toast(`${rows.length}件をダウンロードしました`, 'success');
+      } finally {
+        btn.disabled = false; btn.textContent = '資産履歴 (CSV)';
+      }
+    }));
+
+    document.getElementById('export-incomes-btn').addEventListener('click', withErrorToast(async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true; btn.textContent = '取得中...';
+      try {
+        const { memberById } = await loadMastersForExport();
+        const incomes = await listIncomes({});
+        if (incomes.length === 0) { toast('収入データがありません', 'warn'); return; }
+        const headers = ['occurred_on','earner_member','category','amount','note'];
+        const rows = incomes.map(i => {
+          const member = i.earner_member_id ? memberById.get(i.earner_member_id) : null;
+          return [
+            i.occurred_on,
+            member?.name ?? '(共有)',
+            i.category,
+            Math.round(Number(i.amount)),
+            i.note ?? '',
+          ];
+        });
+        downloadCsv(`incomes_${todayStamp()}.csv`, headers, rows);
+        toast(`${rows.length}件をダウンロードしました`, 'success');
+      } finally {
+        btn.disabled = false; btn.textContent = '収入履歴 (CSV)';
+      }
+    }));
+
+    document.getElementById('export-expenses-btn').addEventListener('click', withErrorToast(async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true; btn.textContent = '取得中...';
+      try {
+        const { memberById } = await loadMastersForExport();
+        const txs = await listTransactions({});
+        if (txs.length === 0) { toast('支出データがありません', 'warn'); return; }
+        const headers = ['occurred_on','payer_member','category','amount','description','source'];
+        const rows = txs.map(t => {
+          const member = t.payer_member_id ? memberById.get(t.payer_member_id) : null;
+          return [
+            t.occurred_on,
+            member?.name ?? '(共有)',
+            t.category,
+            Math.round(Number(t.amount)),
+            t.description ?? '',
+            t.source ?? '',
+          ];
+        });
+        downloadCsv(`expenses_${todayStamp()}.csv`, headers, rows);
+        toast(`${rows.length}件をダウンロードしました`, 'success');
+      } finally {
+        btn.disabled = false; btn.textContent = '支出履歴 (CSV)';
+      }
+    }));
 
     // タブ切替
     document.querySelectorAll('.tab-btn').forEach(b => {

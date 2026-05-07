@@ -82,3 +82,41 @@ export function withErrorToast(fn) {
     }
   };
 }
+
+// ============================================================
+// CSV エクスポート
+// ============================================================
+function csvEscape(value) {
+  if (value == null) return '';
+  const s = String(value);
+  if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+// rows: 2次元配列 [[v1, v2, ...], ...]
+export function downloadCsv(filename, headers, rows) {
+  const lines = [headers.join(',')];
+  for (const r of rows) lines.push(r.map(csvEscape).join(','));
+  // ExcelでUTF-8として正しく開けるようBOMを付ける
+  const csv = '﻿' + lines.join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 100);
+}
+
+// 今日のYYYYMMDD (ファイル名サフィックス用)
+export function todayStamp() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}`;
+}

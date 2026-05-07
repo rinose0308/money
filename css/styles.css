@@ -430,3 +430,49 @@ input[type="number"] {
 .fx-cell .fx-input { max-width: 130px; padding: 0.4rem 0.5rem; font-size: 0.9rem; text-align: right; }
 .fx-cell .fx-result { font-size: 0.75rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .fx-rate-cell { background: #fff7ed; }
+
+/* sticky ツールバー (月次入力など) */
+.sticky-toolbar {
+  position: sticky;
+  top: 53px;  /* ナビゲーションの真下 */
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 1rem;
+  margin: -1rem -1rem 1rem -1rem;
+  z-index: 50;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+}
+@media (min-width: 768px) {
+  .sticky-toolbar {
+    margin: -2rem -2rem 1.5rem -2rem;
+    padding: 0.85rem 2rem;
+  }
+}
+.sticky-toolbar h1 { margin: 0; font-size: 1.15rem; }
+
+/* 未保存インジケーター */
+.btn-dirty {
+  position: relative;
+  box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6);
+  animation: dirty-pulse 1.6s ease-in-out infinite;
+}
+.btn-dirty::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 9px;
+  height: 9px;
+  background: #f59e0b;
+  border-radius: 50%;
+  border: 2px solid var(--bg-card);
+}
+@keyframes dirty-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); }
+  50%      { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+}

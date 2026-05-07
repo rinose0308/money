@@ -347,6 +347,19 @@ export async function replaceMonthlyIncomes({ year, month, rows }) {
 // ============================================================
 // 支出 (transactions) — 月次集計入力用 (source='monthly_manual')
 // ============================================================
+// 全 transactions を取得 (source問わず、エクスポート用)
+export async function listTransactions({ fromDate, toDate } = {}) {
+  let q = supabase
+    .from('transactions')
+    .select('id, occurred_on, amount, category, description, payer_member_id, source, external_id')
+    .order('occurred_on', { ascending: true });
+  if (fromDate) q = q.gte('occurred_on', fromDate);
+  if (toDate)   q = q.lte('occurred_on', toDate);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data ?? [];
+}
+
 export async function listMonthlyTransactions({ fromDate, toDate } = {}) {
   let q = supabase
     .from('transactions')

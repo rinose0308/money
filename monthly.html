@@ -11,13 +11,15 @@
   <main class="container">
     <div id="loading" class="loading"><div class="spinner"></div><p>読み込み中...</p></div>
     <div id="content" style="display:none;">
-      <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
-        <h1 style="margin: 0; font-size: 1.5rem;">月次入力</h1>
-        <div style="display:flex; gap: 0.4rem; align-items: center;">
-          <button class="btn btn-ghost btn-sm" id="prev-month">‹ 前月</button>
-          <input type="month" id="target-month" class="form-input" style="width: 160px; min-height: 36px;">
-          <button class="btn btn-ghost btn-sm" id="next-month">次月 ›</button>
+      <!-- 常時表示の sticky ツールバー -->
+      <div class="sticky-toolbar">
+        <div style="display:flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;">
+          <h1>月次入力</h1>
+          <button class="btn btn-ghost btn-sm" id="prev-month" title="前月" aria-label="前月">‹</button>
+          <input type="month" id="target-month" class="form-input" style="width: 150px; min-height: 36px;">
+          <button class="btn btn-ghost btn-sm" id="next-month" title="次月" aria-label="次月">›</button>
         </div>
+        <button type="button" class="btn btn-primary" id="save-all-btn">💾 保存</button>
       </div>
 
       <div id="loading-month" style="text-align:center; padding: 1rem;">
@@ -97,10 +99,6 @@
           </div>
         </div>
 
-        <!-- 保存 -->
-        <div style="display:flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap;">
-          <button type="button" class="btn btn-primary" id="save-all-btn">💾 この月をまとめて保存</button>
-        </div>
       </div>
     </div>
   </main>
@@ -132,23 +130,64 @@
       return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
     }
 
-    // =========== 月セレクター ===========
+    // =========== 月セレクター + Dirty 追跡 ===========
     const monthInput = document.getElementById('target-month');
     const now = new Date();
     monthInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+    // dirty: 未保存の変更があるかどうか
+    let dirty = false;
+    let currentMonthValue = monthInput.value;
+    const saveBtn = () => document.getElementById('save-all-btn');
+
+    function markDirty() {
+      if (dirty) return;
+      dirty = true;
+      saveBtn().classList.add('btn-dirty');
+    }
+    function clearDirty() {
+      dirty = false;
+      saveBtn().classList.remove('btn-dirty');
+    }
+
+    // 月変更時の確認 (未保存ありなら confirm、キャンセルなら戻す)
+    async function changeMonth(newValue) {
+      if (newValue === currentMonthValue) return;
+      if (dirty && !confirm('未保存の変更があります。破棄して別の月に移動しますか?')) {
+        monthInput.value = currentMonthValue;
+        return;
+      }
+      monthInput.value = newValue;
+      await loadMonth();
+      currentMonthValue = monthInput.value;
+      clearDirty();
+    }
+
     document.getElementById('prev-month').addEventListener('click', () => {
       const [y, m] = monthInput.value.split('-').map(Number);
       const d = new Date(y, m - 2, 1);
-      monthInput.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      loadMonth();
+      changeMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
     });
     document.getElementById('next-month').addEventListener('click', () => {
       const [y, m] = monthInput.value.split('-').map(Number);
       const d = new Date(y, m, 1);
-      monthInput.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      loadMonth();
+      changeMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
     });
-    monthInput.addEventListener('change', loadMonth);
+    monthInput.addEventListener('change', () => {
+      changeMonth(monthInput.value);
+    });
+
+    // フォーム内のあらゆる input/change を捕捉して dirty マーク
+    const formArea = document.getElementById('form-area');
+    formArea.addEventListener('input', markDirty);
+    formArea.addEventListener('change', markDirty);
+
+    // タブを閉じる/リロード/別ナビゲーションへ移動の前に確認
+    window.addEventListener('beforeunload', (e) => {
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = '';
+    });
 
     // =========== ロード処理 ===========
     let accountsCache = [];
@@ -371,7 +410,6 @@
       let copied = 0;
 
       if (isForeign) {
-        // 前月のレート + 各セルの外貨額を復元
         let lastRate = null;
         tr.querySelectorAll('.fx-amount').forEach(inp => {
           const memberId = inp.dataset.memberId || null;
@@ -398,6 +436,7 @@
         });
       }
       if (copied === 0) toast('前月のデータがありません', 'warn');
+      else markDirty();
     }
 
     // ----- 収入 -----
@@ -444,18 +483,18 @@
           <button type="button" class="btn btn-ghost btn-sm row-del" title="削除">✕</button>
         </td>
       `;
-      tr.querySelector('.row-del').addEventListener('click', () => tr.remove());
+      tr.querySelector('.row-del').addEventListener('click', () => { tr.remove(); markDirty(); });
       tr.querySelector('.copy-prev-income').addEventListener('click', () => {
         const earner = tr.querySelector('.inc-earner').value || '';
         const cat = tr.querySelector('.inc-cat').value;
         const prev = prevIncomeMap.get(`${earner}|${cat}`);
-        if (prev) tr.querySelector('.inc-amount').value = Math.round(Number(prev.amount));
+        if (prev) { tr.querySelector('.inc-amount').value = Math.round(Number(prev.amount)); markDirty(); }
         else toast('前月のデータがありません', 'warn');
       });
       document.getElementById('income-tbody').appendChild(tr);
     }
 
-    document.getElementById('add-income-btn').addEventListener('click', () => addIncomeRow({ category: '給与', earner_member_id: null, amount: '' }));
+    document.getElementById('add-income-btn').addEventListener('click', () => { addIncomeRow({ category: '給与', earner_member_id: null, amount: '' }); markDirty(); });
 
     // ----- 支出 -----
     function renderExpenses(txs) {
@@ -510,13 +549,13 @@
           <button type="button" class="btn btn-ghost btn-sm row-del" title="削除">✕</button>
         </td>
       `;
-      tr.querySelector('.row-del').addEventListener('click', () => tr.remove());
+      tr.querySelector('.row-del').addEventListener('click', () => { tr.remove(); markDirty(); });
       tr.querySelector('.copy-prev-expense').addEventListener('click', () => {
         const payer = tr.querySelector('.exp-payer').value || 'shared';
         const cat = tr.querySelector('.exp-cat').value;
         const k = `${payer}|${cat}`;
         const prev = prevExpenseMap.get(k);
-        if (prev != null) tr.querySelector('.exp-amount').value = prev;
+        if (prev != null) { tr.querySelector('.exp-amount').value = prev; markDirty(); }
         else toast('前月のデータがありません', 'warn');
       });
       document.getElementById('expense-tbody').appendChild(tr);
@@ -525,6 +564,7 @@
     document.getElementById('add-expense-btn').addEventListener('click', () => {
       const defaultCat = expcatCache[0]?.name ?? '';
       addExpenseRow({ category: defaultCat, payer_member_id: null, amount: '' });
+      markDirty();
     });
 
     // =========== 保存 ===========
@@ -614,14 +654,17 @@
         await replaceMonthlyTransactions({ year: y, month: m, rows: expenseRows });
 
         toast(`資産${assetAccountsSaved}口座(${assetCellsSaved}件) / 収入${incomeRows.length}件 / 支出${expenseRows.length}件 を保存しました`, 'success');
+        clearDirty();
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '💾 この月をまとめて保存';
+        btn.innerHTML = '💾 保存';
       }
     }));
 
     // 初回ロード
     await loadMonth();
+    currentMonthValue = monthInput.value;
+    clearDirty();
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
   </script>
