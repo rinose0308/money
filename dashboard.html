@@ -179,11 +179,10 @@
       // メトリクス計算
       const latest = trend[trend.length - 1];
       const prev = trend.length >= 2 ? trend[trend.length - 2] : null;
-      const yearAgo = trend.find(t => {
-        const latestDate = new Date(latest.date);
-        const target = new Date(latestDate.getFullYear() - 1, latestDate.getMonth(), latestDate.getDate());
-        return t.date === target.toISOString().slice(0, 10);
-      });
+      // 前年同月の比較は YYYY-MM 部分で照合(月末日が変わっても確実にマッチ)
+      const latestYM = latest.date.slice(0, 7);                    // 例: "2026-04"
+      const targetYM = `${parseInt(latestYM.slice(0,4),10) - 1}-${latestYM.slice(5)}`; // "2025-04"
+      const yearAgo = trend.find(t => t.date.slice(0, 7) === targetYM);
 
       // カード1: 総資産
       document.getElementById('metric-total').textContent = formatYen(latest.total);
