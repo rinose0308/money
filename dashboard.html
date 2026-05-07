@@ -77,8 +77,22 @@
       <div class="grid cols-2" style="margin-top: 1rem;">
         <div class="card">
           <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">資産構成 (最新月)</h3>
-          <div class="chart-container" style="height: 320px;">
+          <div class="chart-container" style="height: 280px;">
             <canvas id="composition-chart"></canvas>
+          </div>
+          <div id="composition-summary" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); font-size: 0.85rem; display: none;">
+            <div style="display:flex; justify-content: space-between;">
+              <span style="color: var(--text-muted);">資産合計</span>
+              <span id="comp-total" style="font-variant-numeric: tabular-nums;">—</span>
+            </div>
+            <div style="display:flex; justify-content: space-between;" id="comp-expense-row">
+              <span style="color: var(--text-muted);">支払予定</span>
+              <span id="comp-expense" class="card-sub down" style="font-variant-numeric: tabular-nums;">—</span>
+            </div>
+            <div style="display:flex; justify-content: space-between; margin-top: 0.25rem; padding-top: 0.5rem; border-top: 1px dashed var(--border);">
+              <span style="font-weight: 600;">純資産</span>
+              <span id="comp-net" style="font-variant-numeric: tabular-nums; font-weight: 700;">—</span>
+            </div>
           </div>
           <div id="composition-empty" class="empty-state" style="display:none; padding: 2rem 1rem;">
             <p>データが入ると表示されます</p>
@@ -220,6 +234,7 @@
 
         // データラベルは点が多すぎると潰れるので、間引く
         const labelStep = Math.max(1, Math.ceil(filtered.length / 12)); // 最大12個まで表示
+        const showLabel = (i) => i % labelStep === 0 || i === filtered.length - 1;
 
         const datasets = typeOrder.map((t, idx) => ({
           label: TYPE_LABELS[t] ?? t,
@@ -231,13 +246,31 @@
           tension: 0.2,
           pointRadius: 0,
           pointHoverRadius: 4,
-          datalabels: { display: false }, // 個別レイヤーには表示しない
+          datalabels: { display: false },
         }));
 
-        // 「合計」線(透明、データラベル用)
+        // 支払予定がある月だけ「-¥X」を引き下げ表示するため、負の値の系列を別スタックで重ねる
+        // (グラフ上でも「資産から下に伸びる支払予定」として可視化)
+        const hasAnyExpense = filtered.some(d => d.expense > 0);
+        if (hasAnyExpense) {
+          datasets.push({
+            label: '支払予定',
+            data: filtered.map(d => -(d.expense ?? 0)),
+            backgroundColor: 'rgba(220, 38, 38, 0.25)',
+            borderColor: 'rgba(220, 38, 38, 0.7)',
+            borderWidth: 1,
+            fill: true,
+            tension: 0,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            datalabels: { display: false },
+          });
+        }
+
+        // 「純資産」線(透明、データラベルだけ表示。位置は資産トップに置く)
         datasets.push({
-          label: '合計',
-          data: filtered.map(d => d.total),
+          label: '純資産',
+          data: filtered.map(d => d.total),  // 位置はスタックの天井 (資産合計)
           backgroundColor: 'transparent',
           borderColor: 'transparent',
           borderWidth: 0,
@@ -245,15 +278,15 @@
           tension: 0,
           pointRadius: 0,
           pointHoverRadius: 0,
-          stack: 'total-line',
+          stack: 'label-line',
           datalabels: {
-            display: (ctx) => ctx.dataIndex % labelStep === 0 || ctx.dataIndex === filtered.length - 1,
+            display: (ctx) => showLabel(ctx.dataIndex),
             anchor: 'end',
             align: 'top',
             offset: 4,
             color: '#111',
             font: { size: 10, weight: '600' },
-            formatter: (v) => formatYenShort(v),
+            formatter: (_, ctx) => formatYenShort(filtered[ctx.dataIndex].net),
           },
         });
 
@@ -274,19 +307,30 @@
                 position: 'bottom',
                 labels: {
                   boxWidth: 12, padding: 10,
-                  filter: (item) => item.text !== '合計', // 合計系列は凡例から隠す
+                  filter: (item) => item.text !== '純資産', // ラベル用ダミー線は凡例から隠す
                 },
               },
               tooltip: {
                 callbacks: {
-                  label: (ctx) => `${ctx.dataset.label}: ${formatYen(ctx.parsed.y)}`,
+                  label: (ctx) => {
+                    if (ctx.dataset.label === '支払予定') {
+                      return `支払予定: -${formatYen(Math.abs(ctx.parsed.y ?? 0))}`;
+                    }
+                    return `${ctx.dataset.label}: ${formatYen(ctx.parsed.y)}`;
+                  },
                   footer: (items) => {
-                    // 合計系列を除外して合算
-                    const total = items.filter(it => it.dataset.label !== '合計').reduce((sum, it) => sum + (it.parsed.y ?? 0), 0);
-                    return `合計: ${formatYen(total)}`;
+                    const idx = items[0]?.dataIndex;
+                    if (idx == null) return '';
+                    const d = filtered[idx];
+                    const lines = [`資産合計: ${formatYen(d.total)}`];
+                    if (d.expense > 0) {
+                      lines.push(`支払予定: -${formatYen(d.expense)}`);
+                      lines.push(`純資産: ${formatYen(d.net)}`);
+                    }
+                    return lines;
                   },
                 },
-                filter: (ctx) => ctx.dataset.label !== '合計',
+                filter: (ctx) => ctx.dataset.label !== '純資産',
               },
             },
             scales: {
@@ -314,6 +358,19 @@
       });
 
       // ===== 資産構成 (最新月) ドーナツ =====
+      // サマリー行 (資産 / 支払予定 / 純額)
+      const compSummary = document.getElementById('composition-summary');
+      compSummary.style.display = 'block';
+      document.getElementById('comp-total').textContent = formatYen(latest.total);
+      const compExpRow = document.getElementById('comp-expense-row');
+      if (latest.expense > 0) {
+        compExpRow.style.display = 'flex';
+        document.getElementById('comp-expense').textContent = `-${formatYen(latest.expense)}`;
+      } else {
+        compExpRow.style.display = 'none';
+      }
+      document.getElementById('comp-net').textContent = formatYen(latest.net);
+
       const compCtx = document.getElementById('composition-chart').getContext('2d');
       const compTypes = Object.keys(latest.byType).filter(t => latest.byType[t] > 0);
       new Chart(compCtx, {
