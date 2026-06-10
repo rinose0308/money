@@ -110,6 +110,27 @@
           </div>
         </div>
       </div>
+
+      <!-- 支出推移 (数値テーブル) -->
+      <h2 class="section-title">支出推移</h2>
+      <div class="card" style="padding: 0;">
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>月</th>
+                <th class="num">支出</th>
+                <th class="num">前月比</th>
+              </tr>
+            </thead>
+            <tbody id="expense-trend-tbody"></tbody>
+          </table>
+        </div>
+        <div id="expense-trend-empty" class="empty-state" style="display:none; padding: 2rem 1rem;">
+          <p style="margin:0;">まだ支出データがありません</p>
+          <a href="/monthly.html" class="btn btn-primary btn-sm" style="margin-top: 0.5rem;">月次入力する</a>
+        </div>
+      </div>
     </div>
   </main>
 
@@ -185,6 +206,40 @@
       progBar.style.width = `${clampedPct}%`;
       if (pct >= 100) progBar.style.background = 'var(--success)';
     }
+
+    // ============ 支出推移テーブル (数値表示・新しい月が上) ============
+    function renderExpenseTrend() {
+      const tbody = document.getElementById('expense-trend-tbody');
+      const empty = document.getElementById('expense-trend-empty');
+      // 支出が1件でもある月だけを対象に、新しい順
+      const withExpense = trend.filter(t => t.expense > 0);
+      if (withExpense.length === 0) {
+        tbody.closest('.table-wrap').style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      // 直近24ヶ月まで、新しい月が上
+      const rows = withExpense.slice(-24).reverse();
+      tbody.innerHTML = '';
+      for (let i = 0; i < rows.length; i++) {
+        const cur = rows[i];
+        const older = rows[i + 1]; // 配列は新→古なので次要素が前月
+        let diffStr = '—', diffCls = '';
+        if (older) {
+          const diff = cur.expense - older.expense;
+          diffCls = diff > 0 ? 'down' : (diff < 0 ? 'up' : ''); // 支出は増=赤(down色)、減=緑(up色)
+          diffStr = `${diff >= 0 ? '+' : ''}${formatYenShort(diff)}`;
+        }
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${cur.date.slice(0, 7)}</td>
+          <td class="num">${formatYen(cur.expense)}</td>
+          <td class="num"><span class="card-sub ${diffCls}">${diffStr}</span></td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+    renderExpenseTrend();
 
     if (trend.length === 0) {
       // データなし状態
