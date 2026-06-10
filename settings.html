@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <title>設定 | 我が家マネー</title>
   <link rel="stylesheet" href="/css/styles.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="我が家マネー">
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
 <body>
@@ -25,6 +30,25 @@
             <button id="copy-code-btn" class="btn btn-ghost btn-sm" style="margin-left: 0.5rem;">コピー</button>
           </div>
         </div>
+      </div>
+
+      <!-- ログインパスワード -->
+      <div class="card" style="margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">ログインパスワード</h3>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+          パスワードを設定すると、次回から<strong>メールを開かずに</strong>メールアドレス+パスワードでログインできます。
+        </p>
+        <form id="pw-form" style="display:flex; gap:0.5rem; align-items: flex-end; flex-wrap: wrap;">
+          <div class="form-group" style="margin: 0; flex: 1; min-width: 160px;">
+            <label class="form-label" for="pw-new">新しいパスワード</label>
+            <input type="password" id="pw-new" class="form-input" minlength="8" autocomplete="new-password" placeholder="8文字以上">
+          </div>
+          <div class="form-group" style="margin: 0; flex: 1; min-width: 160px;">
+            <label class="form-label" for="pw-confirm">確認用</label>
+            <input type="password" id="pw-confirm" class="form-input" minlength="8" autocomplete="new-password" placeholder="もう一度入力">
+          </div>
+          <button type="submit" class="btn btn-primary" id="pw-save">設定</button>
+        </form>
       </div>
 
       <!-- 名義(メンバー) -->
@@ -217,7 +241,7 @@
   </div>
 
   <script type="module">
-    import { requireAuth } from '/js/supabase.js';
+    import { requireAuth, supabase } from '/js/supabase.js';
     import { renderNav } from '/js/nav.js';
     import {
       updateHousehold,
@@ -240,6 +264,30 @@
       try { await navigator.clipboard.writeText(auth.profile.households.invite_code); toast('コピーしました', 'success'); }
       catch { toast('コピーに失敗しました', 'error'); }
     });
+
+    // ============ ログインパスワード設定 ============
+    document.getElementById('pw-form').addEventListener('submit', withErrorToast(async (e) => {
+      e.preventDefault();
+      const pw = document.getElementById('pw-new').value;
+      const confirm = document.getElementById('pw-confirm').value;
+      if (pw.length < 8) { toast('パスワードは8文字以上にしてください', 'error'); return; }
+      if (pw !== confirm) { toast('確認用パスワードが一致しません', 'error'); return; }
+
+      const btn = document.getElementById('pw-save');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> 設定中...';
+
+      const { error } = await supabase.auth.updateUser({ password: pw });
+
+      btn.disabled = false;
+      btn.textContent = '設定';
+
+      if (error) throw error;
+
+      document.getElementById('pw-new').value = '';
+      document.getElementById('pw-confirm').value = '';
+      toast('パスワードを設定しました。次回からメール不要でログインできます', 'success');
+    }));
 
     function escapeHtml(s) {
       return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);

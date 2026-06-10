@@ -455,6 +455,78 @@ input[type="number"] {
 }
 .sticky-toolbar h1 { margin: 0; font-size: 1.15rem; }
 
+/* ============================================================
+   スマホ: テーブルをカード型スタックに変換 (.stacked-mobile)
+   各 td に data-label を付けるとラベル付きで縦に積まれる
+   ============================================================ */
+@media (max-width: 767px) {
+  /* ナビは固定解除して、sticky-toolbarを一番上に */
+  .app-nav { position: static; }
+  .sticky-toolbar { top: 0; }
+
+  /* iOSの自動ズーム防止: フォーカス可能な入力は16px以上 */
+  .form-input, .form-select, .fx-cell .fx-input {
+    font-size: 16px;
+  }
+
+  .stacked-mobile { border-collapse: separate; }
+  .stacked-mobile thead { display: none; }
+  .stacked-mobile tbody { display: block; }
+  .stacked-mobile tr {
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    margin-bottom: 0.75rem;
+    padding: 0.6rem 0.8rem;
+    background: var(--bg-card);
+  }
+  .stacked-mobile td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    border: none !important;
+    padding: 0.3rem 0;
+    font-size: 0.95rem;
+  }
+  .stacked-mobile td[data-label]::before {
+    content: attr(data-label);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    min-width: 5em;
+  }
+  /* 入力・セレクトは右側に寄せて十分な幅を確保 */
+  .stacked-mobile td .form-input,
+  .stacked-mobile td .form-select {
+    max-width: 60% !important;
+    width: 60%;
+    min-width: 140px;
+  }
+  .stacked-mobile td .fx-cell {
+    width: 60%;
+    min-width: 140px;
+  }
+  .stacked-mobile td .fx-cell .fx-input { max-width: 100%; width: 100%; }
+  /* ドラッグハンドルセルはスマホでは非表示 (並び替えはPCで) */
+  .stacked-mobile .drag-cell { display: none; }
+  /* スマホで意味のないセル (円口座のレート"—"など) */
+  .stacked-mobile .mob-hide { display: none; }
+  /* アクションボタン行 */
+  .stacked-mobile .actions-cell {
+    justify-content: flex-end;
+    padding-top: 0.5rem;
+    margin-top: 0.3rem;
+    border-top: 1px dashed var(--border) !important;
+  }
+  /* 行頭の口座名/タイトルセル */
+  .stacked-mobile .title-cell {
+    font-weight: 600;
+    font-size: 1rem;
+    padding-bottom: 0.4rem;
+  }
+}
+
 /* 未保存インジケーター */
 .btn-dirty {
   position: relative;

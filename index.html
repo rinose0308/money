@@ -5,15 +5,21 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <title>ログイン | 我が家マネー</title>
   <link rel="stylesheet" href="/css/styles.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="我が家マネー">
 </head>
 <body>
   <main class="auth-screen">
     <div class="auth-card">
-      <h1 class="auth-title">我が家マネー</h1>
+      <h1 class="auth-title">💰 我が家マネー</h1>
       <p class="auth-subtitle">家計簿アプリへログイン</p>
 
-      <div id="login-view">
-        <form id="login-form">
+      <!-- パスワードログイン (デフォルト) -->
+      <div id="password-view">
+        <form id="password-form">
           <div class="form-group">
             <label class="form-label" for="email">メールアドレス</label>
             <input
@@ -21,7 +27,40 @@
               id="email"
               class="form-input"
               required
-              autocomplete="email"
+              autocomplete="username"
+              placeholder="example@gmail.com"
+            >
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="password">パスワード</label>
+            <input
+              type="password"
+              id="password"
+              class="form-input"
+              required
+              autocomplete="current-password"
+              placeholder="パスワード"
+            >
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" id="password-submit-btn">
+            ログイン
+          </button>
+        </form>
+        <p style="text-align:center; margin: 1rem 0 0; font-size: 0.85rem;">
+          <a href="#" id="to-magic-link">メールリンクでログイン (初回/パスワード未設定の方)</a>
+        </p>
+      </div>
+
+      <!-- Magic Link ログイン -->
+      <div id="login-view" style="display:none;">
+        <form id="login-form">
+          <div class="form-group">
+            <label class="form-label" for="ml-email">メールアドレス</label>
+            <input
+              type="email"
+              id="ml-email"
+              class="form-input"
+              autocomplete="username"
               placeholder="example@gmail.com"
             >
             <p class="form-help">入力したメールアドレスにログインリンクを送信します</p>
@@ -30,6 +69,12 @@
             ログインリンクを送信
           </button>
         </form>
+        <p style="text-align:center; margin: 1rem 0 0; font-size: 0.85rem;">
+          <a href="#" id="to-password">パスワードでログイン</a>
+        </p>
+        <p style="margin: 0.75rem 0 0; font-size: 0.78rem; color: var(--text-muted);">
+          💡 ログイン後、設定画面でパスワードを登録すると次回からメール不要でログインできます。
+        </p>
       </div>
 
       <div id="sent-view" style="display:none;">
@@ -41,7 +86,7 @@
             メールのリンクをクリックしてログインしてください。
           </p>
           <button type="button" class="btn btn-ghost btn-block" id="back-btn">
-            別のメールで再送信
+            戻る
           </button>
         </div>
       </div>
@@ -58,16 +103,67 @@
       if (user) window.location.replace('/dashboard.html');
     })();
 
-    const form = document.getElementById('login-form');
-    const submitBtn = document.getElementById('submit-btn');
+    const passwordView = document.getElementById('password-view');
     const loginView = document.getElementById('login-view');
     const sentView = document.getElementById('sent-view');
+
+    // 前回使ったメールをプリフィル
+    const savedEmail = localStorage.getItem('last_email') || '';
+    if (savedEmail) {
+      document.getElementById('email').value = savedEmail;
+      document.getElementById('ml-email').value = savedEmail;
+    }
+
+    function show(view) {
+      passwordView.style.display = view === 'password' ? 'block' : 'none';
+      loginView.style.display = view === 'magic' ? 'block' : 'none';
+      sentView.style.display = view === 'sent' ? 'block' : 'none';
+    }
+
+    document.getElementById('to-magic-link').addEventListener('click', (e) => { e.preventDefault(); show('magic'); });
+    document.getElementById('to-password').addEventListener('click', (e) => { e.preventDefault(); show('password'); });
+    document.getElementById('back-btn').addEventListener('click', () => show('password'));
+
+    // ============ パスワードログイン ============
+    const passwordForm = document.getElementById('password-form');
+    const passwordSubmitBtn = document.getElementById('password-submit-btn');
+
+    passwordForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      if (!email || !password) return;
+
+      passwordSubmitBtn.disabled = true;
+      passwordSubmitBtn.innerHTML = '<span class="spinner"></span> ログイン中...';
+
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+      passwordSubmitBtn.disabled = false;
+      passwordSubmitBtn.textContent = 'ログイン';
+
+      if (error) {
+        console.error(error);
+        if (error.message?.includes('Invalid login credentials')) {
+          toast('メールアドレスまたはパスワードが違います。パスワード未設定の方は「メールリンクでログイン」を使ってください', 'error');
+        } else {
+          toast(error.message || 'ログインに失敗しました', 'error');
+        }
+        return;
+      }
+
+      localStorage.setItem('last_email', email);
+      window.location.replace('/dashboard.html');
+    });
+
+    // ============ Magic Link ============
+    const form = document.getElementById('login-form');
+    const submitBtn = document.getElementById('submit-btn');
     const sentEmail = document.getElementById('sent-email');
-    const backBtn = document.getElementById('back-btn');
 
     form.addEventListener('submit', withErrorToast(async (e) => {
       e.preventDefault();
-      const email = document.getElementById('email').value.trim();
+      const email = document.getElementById('ml-email').value.trim();
       if (!email) return;
 
       submitBtn.disabled = true;
@@ -85,16 +181,11 @@
 
       if (error) throw error;
 
+      localStorage.setItem('last_email', email);
       sentEmail.textContent = email;
-      loginView.style.display = 'none';
-      sentView.style.display = 'block';
+      show('sent');
       toast('メールを送信しました', 'success');
     }));
-
-    backBtn.addEventListener('click', () => {
-      loginView.style.display = 'block';
-      sentView.style.display = 'none';
-    });
   </script>
 </body>
 </html>

@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <title>月次入力 | 我が家マネー</title>
   <link rel="stylesheet" href="/css/styles.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="我が家マネー">
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
 <body>
@@ -42,7 +47,7 @@
             ⋮⋮を掴んで並び替え。外貨口座は外貨額×レート。<a href="/settings.html">設定</a>で口座を追加・編集できます。
           </p>
           <div class="table-wrap" id="assets-table-wrap" style="display:none;">
-            <table class="table">
+            <table class="table stacked-mobile">
               <thead id="assets-thead"></thead>
               <tbody id="assets-tbody"></tbody>
             </table>
@@ -60,7 +65,7 @@
             名義ごとに金額を入力してください(0円や空欄でもOK)。
           </p>
           <div class="table-wrap">
-            <table class="table">
+            <table class="table stacked-mobile">
               <thead>
                 <tr>
                   <th>名義</th>
@@ -85,7 +90,7 @@
             <a href="/settings.html">支出カテゴリ</a>を登録すると、デフォルトで全カテゴリの行が出ます。
           </p>
           <div class="table-wrap">
-            <table class="table">
+            <table class="table stacked-mobile">
               <thead>
                 <tr>
                   <th>名義</th>
@@ -302,8 +307,8 @@
           return '';
         })();
         const rateCell = acc.is_foreign_currency
-          ? `<td class="num fx-rate-cell"><input type="number" step="0.0001" inputmode="decimal" class="form-input fx-rate" data-account-id="${acc.id}" style="text-align:right; max-width: 110px;" value="${sharedRate || ''}" placeholder="例: 150"></td>`
-          : `<td class="num" style="color: var(--text-muted);">—</td>`;
+          ? `<td class="num fx-rate-cell" data-label="レート"><input type="number" step="0.0001" inputmode="decimal" class="form-input fx-rate" data-account-id="${acc.id}" style="text-align:right; max-width: 110px;" value="${sharedRate || ''}" placeholder="例: 150"></td>`
+          : `<td class="num mob-hide" style="color: var(--text-muted);">—</td>`;
 
         const cells = assetCols.map(c => {
           const key = `${acc.id}|${c.id ?? 'shared'}`;
@@ -312,7 +317,7 @@
             const fa = ex?.foreign_amount != null ? Number(ex.foreign_amount) : '';
             const calcInit = (fa !== '' && sharedRate !== '') ? Math.round(fa * sharedRate) : null;
             return `
-              <td class="num">
+              <td class="num" data-label="${escapeHtml(c.name)}">
                 <div class="fx-cell">
                   <input type="number" step="0.0001" inputmode="decimal"
                     class="form-input fx-input fx-amount"
@@ -325,7 +330,7 @@
           } else {
             const v = ex ? Math.round(Number(ex.balance)) : '';
             return `
-              <td class="num">
+              <td class="num" data-label="${escapeHtml(c.name)}">
                 <input type="number" inputmode="numeric"
                   class="form-input asset-input"
                   data-account-id="${acc.id}" data-member-id="${c.id ?? ''}"
@@ -341,12 +346,12 @@
           : `<div style="font-weight:500;">${escapeHtml(acc.name)}</div>`;
 
         tr.innerHTML = `
-          <td><span class="drag-handle" title="ドラッグで並び替え">⋮⋮</span></td>
-          <td>${accLabel}</td>
-          <td><span class="badge ${acc.account_type}">${TYPE_LABELS[acc.account_type] ?? acc.account_type}</span></td>
+          <td class="drag-cell"><span class="drag-handle" title="ドラッグで並び替え">⋮⋮</span></td>
+          <td class="title-cell">${accLabel}</td>
+          <td data-label="種別"><span class="badge ${acc.account_type}">${TYPE_LABELS[acc.account_type] ?? acc.account_type}</span></td>
           ${rateCell}
           ${cells}
-          <td><button type="button" class="btn btn-ghost btn-sm copy-prev-asset" data-id="${acc.id}" title="前月の値をコピー">前月</button></td>
+          <td class="actions-cell"><button type="button" class="btn btn-ghost btn-sm copy-prev-asset" data-id="${acc.id}" title="前月の値をコピー">前月</button></td>
         `;
         tbody.appendChild(tr);
       }
@@ -466,19 +471,19 @@
       const tr = document.createElement('tr');
       tr.classList.add('income-row');
       tr.innerHTML = `
-        <td>
+        <td data-label="名義">
           <select class="form-select inc-earner" style="min-width: 130px;">
             <option value="">(共有)</option>
             ${membersCache.map(m => `<option value="${m.id}"${m.id===earner_member_id?' selected':''}>${escapeHtml(m.name)}</option>`).join('')}
           </select>
         </td>
-        <td>
+        <td data-label="カテゴリ">
           <select class="form-select inc-cat" style="min-width: 120px;">
             ${DEFAULT_INCOME_CATEGORIES.map(c => `<option value="${escapeHtml(c)}"${c===category?' selected':''}>${escapeHtml(c)}</option>`).join('')}
           </select>
         </td>
-        <td class="num"><input type="number" inputmode="numeric" class="form-input inc-amount" style="text-align:right; max-width: 200px;" value="${amount ?? ''}" placeholder="0"></td>
-        <td style="display:flex; gap:0.3rem;">
+        <td class="num" data-label="金額"><input type="number" inputmode="numeric" class="form-input inc-amount" style="text-align:right; max-width: 200px;" value="${amount ?? ''}" placeholder="0"></td>
+        <td class="actions-cell" style="display:flex; gap:0.3rem;">
           <button type="button" class="btn btn-ghost btn-sm copy-prev-income" title="前月の値をコピー">前月</button>
           <button type="button" class="btn btn-ghost btn-sm row-del" title="削除">✕</button>
         </td>
@@ -532,19 +537,19 @@
       const catOptions = Array.from(catNames).map(c => `<option value="${escapeHtml(c)}"${c===category?' selected':''}>${escapeHtml(c)}</option>`).join('');
 
       tr.innerHTML = `
-        <td>
+        <td data-label="名義">
           <select class="form-select exp-payer" style="min-width: 130px;">
             <option value="">(共有)</option>
             ${membersCache.map(m => `<option value="${m.id}"${m.id===payer_member_id?' selected':''}>${escapeHtml(m.name)}</option>`).join('')}
           </select>
         </td>
-        <td>
+        <td data-label="カテゴリ">
           <select class="form-select exp-cat" style="min-width: 130px;">
             ${catOptions || `<option value="${escapeHtml(category ?? '合計')}" selected>${escapeHtml(category ?? '合計')}</option>`}
           </select>
         </td>
-        <td class="num"><input type="number" inputmode="numeric" class="form-input exp-amount" style="text-align:right; max-width: 200px;" value="${amount ?? ''}" placeholder="0"></td>
-        <td style="display:flex; gap:0.3rem;">
+        <td class="num" data-label="金額"><input type="number" inputmode="numeric" class="form-input exp-amount" style="text-align:right; max-width: 200px;" value="${amount ?? ''}" placeholder="0"></td>
+        <td class="actions-cell" style="display:flex; gap:0.3rem;">
           <button type="button" class="btn btn-ghost btn-sm copy-prev-expense" title="前月の値をコピー">前月</button>
           <button type="button" class="btn btn-ghost btn-sm row-del" title="削除">✕</button>
         </td>
