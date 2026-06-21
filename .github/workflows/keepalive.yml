@@ -3,10 +3,10 @@ name: Supabase Keepalive
 # 目的: Supabase無料プランは7日間アクセスがないと自動で一時停止される。
 # 2日に1回、軽いクエリを投げて「使用中」状態を保ち、停止を防ぐ。
 #
-# 注意: GitHubは「リポジトリに60日間コミットが無い」と scheduled workflow を
-# 自動で無効化する。普段から開発でpushしていれば問題ないが、長期間放置すると
-# 止まる可能性がある。その場合はGitHubのActionsタブから手動で再有効化するか、
-# 何かコミットを1つ入れればリセットされる。
+# さらに、GitHubは「リポジトリに60日間コミットが無い」と scheduled workflow を
+# 自動で無効化してしまう。これを防ぐため、実行のたびに .keepalive ファイルへ
+# 実行時刻を書き込んで自動コミットする → 60日タイマーが毎回リセットされ、
+# 家計簿に金額を入力するだけ(=GitHubには無関係)の運用でも止まらなくなる。
 
 on:
   schedule:
@@ -15,11 +15,18 @@ on:
   # 手動実行も可能 (ActionsタブのRun workflowボタン)
   workflow_dispatch:
 
+# 自動コミットのために書き込み権限が必要
+permissions:
+  contents: write
+
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase REST API
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Supabaseにキープアライブのクエリを送信
         run: |
           SUPABASE_URL="https://hcnkixmoybavgoewkhxa.supabase.co"
           ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjbmtpeG1veWJhdmdvZXdraHhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MTM4MTAsImV4cCI6MjA5Mjk4OTgxMH0.5UCw8AaZ0Xw-_fzk9YndoJgBFOd4OzUZnxWZst2KLLE"
@@ -32,10 +39,24 @@ jobs:
 
           echo "HTTPステータス: ${HTTP_CODE}"
 
-          # 200 (RLSで空配列が返る) なら成功。停止中なら 000/503 など。
           if [ "${HTTP_CODE}" = "200" ]; then
             echo "✅ Supabaseは稼働中。キープアライブ成功。"
           else
             echo "⚠️ 想定外のステータス (${HTTP_CODE})。プロジェクトが停止しているか、設定を確認してください。"
             exit 1
+          fi
+
+      - name: 実行時刻を記録して自動コミット (60日タイマー対策)
+        run: |
+          echo "Last keepalive run: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" > .keepalive
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .keepalive
+          # 変更があるときだけコミット (念のため)
+          if git diff --staged --quiet; then
+            echo "変更なし。コミットをスキップ。"
+          else
+            git commit -m "chore: keepalive $(date -u '+%Y-%m-%d')"
+            git push
+            echo "✅ .keepalive を更新してpush。60日タイマーをリセット。"
           fi
