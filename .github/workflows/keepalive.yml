@@ -1,23 +1,32 @@
 name: Supabase Keepalive
 
-# 目的: Supabase無料プランは7日間アクセスがないと自動で一時停止される。
-# 2日に1回、軽いクエリを投げて「使用中」状態を保ち、停止を防ぐ。
-#
-# さらに、GitHubは「リポジトリに60日間コミットが無い」と scheduled workflow を
-# 自動で無効化してしまう。これを防ぐため、実行のたびに .keepalive ファイルへ
-# 実行時刻を書き込んで自動コミットする → 60日タイマーが毎回リセットされ、
-# 家計簿に金額を入力するだけ(=GitHubには無関係)の運用でも止まらなくなる。
+# 目的:
+# 1. Supabase無料プランは7日間アクセスがないと自動で一時停止される。
+#    毎日1回、軽いクエリを投げて「使用中」状態を保つ。
+# 2. それでも停止してしまった場合は、Management API で自動復旧 (Resume) する。
+#    ※ 自動復旧には SUPABASE_ACCESS_TOKEN シークレットの登録が必要。
+#       https://supabase.com/dashboard/account/tokens でトークンを発行し、
+#       リポジトリの Settings > Secrets and variables > Actions に登録する。
+# 3. GitHubは「リポジトリに60日間コミットが無い」と scheduled workflow を
+#    無効化するため、実行のたびに .keepalive へ実行時刻をコミットして
+#    タイマーをリセットする。
 
 on:
   schedule:
-    # 2日に1回、UTC 15:00 (日本時間 翌0:00) に実行
-    - cron: '0 15 */2 * *'
+    # 毎日 UTC 15:00 (日本時間 0:00) に実行
+    - cron: '0 15 * * *'
   # 手動実行も可能 (ActionsタブのRun workflowボタン)
   workflow_dispatch:
 
 # 自動コミットのために書き込み権限が必要
 permissions:
   contents: write
+
+env:
+  SUPABASE_URL: https://hcnkixmoybavgoewkhxa.supabase.co
+  PROJECT_REF: hcnkixmoybavgoewkhxa
+  ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjbmtpeG1veWJhdmdvZXdraHhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MTM4MTAsImV4cCI6MjA5Mjk4OTgxMH0.5UCw8AaZ0Xw-_fzk9YndoJgBFOd4OzUZnxWZst2KLLE
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
 jobs:
   ping:
@@ -26,25 +35,57 @@ jobs:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
 
-      - name: Supabaseにキープアライブのクエリを送信
+      - name: Supabaseにping (停止していたら自動復旧)
         run: |
-          SUPABASE_URL="https://hcnkixmoybavgoewkhxa.supabase.co"
-          ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjbmtpeG1veWJhdmdvZXdraHhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MTM4MTAsImV4cCI6MjA5Mjk4OTgxMH0.5UCw8AaZ0Xw-_fzk9YndoJgBFOd4OzUZnxWZst2KLLE"
+          ping_once() {
+            curl -sS -o /dev/null -w "%{http_code}" \
+              "${SUPABASE_URL}/rest/v1/households?select=id&limit=1" \
+              -H "apikey: ${ANON_KEY}" \
+              -H "Authorization: Bearer ${ANON_KEY}" \
+              --max-time 20 2>/dev/null || echo "000"
+          }
 
-          echo "Supabaseにキープアライブのクエリを送信..."
-          HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
-            "${SUPABASE_URL}/rest/v1/households?select=id&limit=1" \
-            -H "apikey: ${ANON_KEY}" \
-            -H "Authorization: Bearer ${ANON_KEY}")
+          CODE=$(ping_once)
+          echo "ping結果: HTTP ${CODE}"
 
-          echo "HTTPステータス: ${HTTP_CODE}"
-
-          if [ "${HTTP_CODE}" = "200" ]; then
+          if [ "${CODE}" = "200" ]; then
             echo "✅ Supabaseは稼働中。キープアライブ成功。"
-          else
-            echo "⚠️ 想定外のステータス (${HTTP_CODE})。プロジェクトが停止しているか、設定を確認してください。"
+            exit 0
+          fi
+
+          echo "⚠️ 応答がありません (HTTP ${CODE})。プロジェクトが一時停止している可能性があります。"
+
+          if [ -z "${SUPABASE_ACCESS_TOKEN}" ]; then
+            echo "❌ SUPABASE_ACCESS_TOKEN が未設定のため自動復旧できません。"
+            echo "   1) https://supabase.com/dashboard/account/tokens でトークンを発行"
+            echo "   2) リポジトリの Settings > Secrets and variables > Actions に"
+            echo "      SUPABASE_ACCESS_TOKEN という名前で登録してください。"
+            echo "   (応急処置: SupabaseダッシュボードでResume projectを押す)"
             exit 1
           fi
+
+          echo "🔄 Management API で自動復旧 (Resume) を実行します..."
+          RESTORE_CODE=$(curl -sS -o /tmp/restore_res.txt -w "%{http_code}" \
+            -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/restore" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --max-time 30 || echo "000")
+          echo "restore API: HTTP ${RESTORE_CODE}"
+          cat /tmp/restore_res.txt || true
+
+          # 最大10分間 (30秒 x 20回) 復旧を待つ
+          for i in $(seq 1 20); do
+            sleep 30
+            CODE=$(ping_once)
+            echo "  復旧確認 ${i}/20: HTTP ${CODE}"
+            if [ "${CODE}" = "200" ]; then
+              echo "✅ 自動復旧に成功しました。"
+              exit 0
+            fi
+          done
+
+          echo "❌ 10分待っても復旧を確認できませんでした。Supabaseダッシュボードを確認してください。"
+          exit 1
 
       - name: 実行時刻を記録して自動コミット (60日タイマー対策)
         run: |
@@ -52,7 +93,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .keepalive
-          # 変更があるときだけコミット (念のため)
           if git diff --staged --quiet; then
             echo "変更なし。コミットをスキップ。"
           else
