@@ -366,6 +366,11 @@
       function renderChart(months) {
         const filtered = months > 0 ? trend.slice(-months) : trend;
 
+        // 24ヶ月以内は棒グラフ(月ごとがくっきり見やすい)、それより長期は面グラフ
+        // (棒だと本数が多すぎて潰れるため)
+        const chartType = (months > 0 && months <= 24) ? 'bar' : 'line';
+        const isBar = chartType === 'bar';
+
         // 系列: account_type ごとのスタック
         const types = new Set();
         for (const t of filtered) for (const k of Object.keys(t.byType)) types.add(k);
@@ -375,16 +380,16 @@
         const labelStep = Math.max(1, Math.ceil(filtered.length / 12)); // 最大12個まで表示
         const showLabel = (i) => i % labelStep === 0 || i === filtered.length - 1;
 
-        const datasets = typeOrder.map((t, idx) => ({
+        // 面グラフ用の塗り/曲線スタイル (棒グラフでは不要)
+        const areaStyle = isBar ? {} : { fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4 };
+
+        const datasets = typeOrder.map((t) => ({
           label: TYPE_LABELS[t] ?? t,
           data: filtered.map(d => d.byType[t] ?? 0),
-          backgroundColor: TYPE_COLORS[t] + 'cc',
+          backgroundColor: TYPE_COLORS[t] + (isBar ? '' : 'cc'),
           borderColor: TYPE_COLORS[t],
-          borderWidth: 1,
-          fill: true,
-          tension: 0.2,
-          pointRadius: 0,
-          pointHoverRadius: 4,
+          borderWidth: isBar ? 0 : 1,
+          ...areaStyle,
           datalabels: { display: false },
         }));
 
@@ -395,19 +400,18 @@
           datasets.push({
             label: '支払予定',
             data: filtered.map(d => -(d.expense ?? 0)),
-            backgroundColor: 'rgba(220, 38, 38, 0.25)',
+            backgroundColor: isBar ? 'rgba(220, 38, 38, 0.55)' : 'rgba(220, 38, 38, 0.25)',
             borderColor: 'rgba(220, 38, 38, 0.7)',
-            borderWidth: 1,
-            fill: true,
-            tension: 0,
-            pointRadius: 0,
-            pointHoverRadius: 4,
+            borderWidth: isBar ? 0 : 1,
+            ...(isBar ? {} : { fill: true, tension: 0, pointRadius: 0, pointHoverRadius: 4 }),
             datalabels: { display: false },
           });
         }
 
         // 「純資産」線(透明、データラベルだけ表示。位置は資産トップに置く)
+        // 棒グラフのときも折れ線として重ねる (mixed chart)
         datasets.push({
+          type: 'line',
           label: '純資産',
           data: filtered.map(d => d.total),  // 位置はスタックの天井 (資産合計)
           backgroundColor: 'transparent',
@@ -431,7 +435,7 @@
 
         if (chart) chart.destroy();
         chart = new Chart(chartCtx, {
-          type: 'line',
+          type: chartType,
           data: {
             labels: filtered.map(d => d.date.slice(0, 7)),
             datasets,
