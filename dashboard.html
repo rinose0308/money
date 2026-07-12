@@ -104,15 +104,25 @@
           </div>
         </div>
         <div class="card">
-          <h3 style="margin: 0 0 0.75rem; font-size: 1rem;">前年同月比</h3>
-          <div id="yoy-comparison">
-            <p style="color: var(--text-muted); padding: 2rem 1rem; text-align:center; margin:0;">データが揃ったら表示されます</p>
+          <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">純資産 前年同月比</h3>
+          <div id="net-yoy-wrap" class="chart-container" style="height: 260px;">
+            <canvas id="net-yoy-chart"></canvas>
+          </div>
+          <div id="yoy-comparison" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
+          <div id="net-yoy-empty" class="empty-state" style="display:none; padding: 2rem 1rem;">
+            <p style="margin:0;">前年のデータが揃うと表示されます</p>
           </div>
         </div>
       </div>
 
-      <!-- 支出推移 (数値テーブル) -->
+      <!-- 支出推移 -->
       <h2 class="section-title">支出推移</h2>
+      <div id="expense-chart-card" class="card" style="display:none; margin-bottom: 1rem;">
+        <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">今年と前年の同月比較</div>
+        <div class="chart-container" style="height: 300px;">
+          <canvas id="expense-chart"></canvas>
+        </div>
+      </div>
       <div class="card" style="padding: 0;">
         <div class="table-wrap">
           <table class="table">
@@ -121,6 +131,7 @@
                 <th>月</th>
                 <th class="num">支出</th>
                 <th class="num">前月比</th>
+                <th class="num">前年同月比</th>
               </tr>
             </thead>
             <tbody id="expense-trend-tbody"></tbody>
@@ -168,6 +179,17 @@
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
+
+    // 'YYYY-MM' -> trendエントリ の索引 (前年同月の照合に使う)
+    const trendByYM = new Map(trend.map(t => [t.date.slice(0, 7), t]));
+    const MONTH_LABELS = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+    // 前年同月の値を返す (無ければ null)
+    function yearAgoValue(ym, key) {
+      const [y, m] = ym.split('-').map(Number);
+      const prev = trendByYM.get(`${y - 1}-${String(m).padStart(2, '0')}`);
+      return prev ? (prev[key] ?? null) : null;
+    }
 
     // ============ 目標額カードの初期化 (データ有無に関わらず) ============
     function renderTargetCards(currentTotal) {
@@ -230,16 +252,73 @@
           diffCls = diff > 0 ? 'down' : (diff < 0 ? 'up' : ''); // 支出は増=赤(down色)、減=緑(up色)
           diffStr = `${diff >= 0 ? '+' : ''}${formatYenShort(diff)}`;
         }
+        // 前年同月比
+        let yoyStr = '—', yoyCls = '';
+        const ya = yearAgoValue(cur.date.slice(0, 7), 'expense');
+        if (ya != null && ya > 0) {
+          const yd = cur.expense - ya;
+          yoyCls = yd > 0 ? 'down' : (yd < 0 ? 'up' : '');
+          yoyStr = `${yd >= 0 ? '+' : ''}${formatYenShort(yd)}`;
+        }
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>${cur.date.slice(0, 7)}</td>
           <td class="num">${formatYen(cur.expense)}</td>
           <td class="num"><span class="card-sub ${diffCls}">${diffStr}</span></td>
+          <td class="num"><span class="card-sub ${yoyCls}">${yoyStr}</span></td>
         `;
         tbody.appendChild(tr);
       }
     }
     renderExpenseTrend();
+
+    // ============ 支出グラフ (今年 vs 前年同月・棒グラフ) ============
+    function renderExpenseChart() {
+      const card = document.getElementById('expense-chart-card');
+      if (!trend.some(t => t.expense > 0)) { card.style.display = 'none'; return; }
+
+      const years = [...new Set(trend.map(t => +t.date.slice(0, 4)))].sort((a, b) => a - b);
+      const curYear = years[years.length - 1];
+      const curData = [], prevData = [];
+      for (let m = 1; m <= 12; m++) {
+        const mm = String(m).padStart(2, '0');
+        const c = trendByYM.get(`${curYear}-${mm}`);
+        const p = trendByYM.get(`${curYear - 1}-${mm}`);
+        curData.push(c && c.expense > 0 ? c.expense : null);
+        prevData.push(p && p.expense > 0 ? p.expense : null);
+      }
+
+      card.style.display = 'block';
+      const ctx = document.getElementById('expense-chart').getContext('2d');
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: MONTH_LABELS,
+          datasets: [
+            { label: `${curYear}年`, data: curData, backgroundColor: '#ef4444' },
+            { label: `${curYear - 1}年`, data: prevData, backgroundColor: '#cbd5e1' },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
+            datalabels: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (c) => `${c.dataset.label}: ${c.parsed.y == null ? '—' : formatYen(c.parsed.y)}`,
+              },
+            },
+          },
+          scales: {
+            y: { beginAtZero: true, ticks: { callback: (v) => formatYenShort(v) } },
+          },
+        },
+      });
+    }
+    renderExpenseChart();
 
     if (trend.length === 0) {
       // データなし状態
@@ -475,29 +554,71 @@
         },
       });
 
-      // ===== 前年同月比 (net基準) =====
-      if (yearAgo) {
-        const yoyDiff = latest.net - yearAgo.net;
-        const yoyPct = yearAgo.net !== 0 ? (yoyDiff / yearAgo.net) * 100 : 0;
-        document.getElementById('yoy-comparison').innerHTML = `
-          <div style="display: grid; gap: 0.5rem;">
-            <div style="display:flex; justify-content: space-between;">
-              <span style="color: var(--text-muted);">${yearAgo.date}</span>
-              <span style="font-variant-numeric: tabular-nums;">${formatYen(yearAgo.net)}</span>
-            </div>
-            <div style="display:flex; justify-content: space-between;">
-              <span style="color: var(--text-muted);">${latest.date}</span>
-              <span style="font-variant-numeric: tabular-nums; font-weight:600;">${formatYen(latest.net)}</span>
-            </div>
-            <hr style="border:none; border-top:1px solid var(--border); margin: 0.5rem 0;">
-            <div style="display:flex; justify-content: space-between;">
-              <span>差額</span>
+      // ===== 純資産 前年同月比 (今年 vs 昨年・折れ線) =====
+      const yoyYears = [...new Set(trend.map(t => +t.date.slice(0, 4)))].sort((a, b) => a - b);
+      const yoyCurYear = yoyYears[yoyYears.length - 1];
+      const netCur = [], netPrev = [];
+      let hasPrevYear = false;
+      for (let m = 1; m <= 12; m++) {
+        const mm = String(m).padStart(2, '0');
+        const c = trendByYM.get(`${yoyCurYear}-${mm}`);
+        const p = trendByYM.get(`${yoyCurYear - 1}-${mm}`);
+        netCur.push(c ? c.net : null);
+        netPrev.push(p ? p.net : null);
+        if (p) hasPrevYear = true;
+      }
+
+      const yoyChartWrap = document.getElementById('net-yoy-wrap');
+      const yoyEmpty = document.getElementById('net-yoy-empty');
+      const yoySummary = document.getElementById('yoy-comparison');
+
+      if (!hasPrevYear) {
+        // 前年データがまだ無い → グラフは隠して案内を出す
+        yoyChartWrap.style.display = 'none';
+        yoyEmpty.style.display = 'block';
+        yoySummary.innerHTML = '';
+      } else {
+        const yoyCtx = document.getElementById('net-yoy-chart').getContext('2d');
+        new Chart(yoyCtx, {
+          type: 'line',
+          data: {
+            labels: MONTH_LABELS,
+            datasets: [
+              { label: `${yoyCurYear}年`, data: netCur, borderColor: '#2563eb', backgroundColor: '#2563eb', tension: 0.2, spanGaps: true, pointRadius: 2 },
+              { label: `${yoyCurYear - 1}年`, data: netPrev, borderColor: '#94a3b8', backgroundColor: '#94a3b8', borderDash: [5, 4], tension: 0.2, spanGaps: true, pointRadius: 2 },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
+              datalabels: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (c) => `${c.dataset.label}: ${c.parsed.y == null ? '—' : formatYen(c.parsed.y)}`,
+                },
+              },
+            },
+            scales: { y: { ticks: { callback: (v) => formatYenShort(v) } } },
+          },
+        });
+
+        // グラフ下に「最新月 vs 前年同月」の差額を1行で
+        if (yearAgo) {
+          const yoyDiff = latest.net - yearAgo.net;
+          const yoyPct = yearAgo.net !== 0 ? (yoyDiff / yearAgo.net) * 100 : 0;
+          yoySummary.innerHTML = `
+            <div style="display:flex; justify-content: space-between; align-items: baseline;">
+              <span style="color: var(--text-muted);">${latest.date.slice(0,7)} vs ${yearAgo.date.slice(0,7)}</span>
               <span class="${yoyDiff >= 0 ? 'card-sub up' : 'card-sub down'}" style="font-weight:600; font-variant-numeric: tabular-nums;">
                 ${yoyDiff >= 0 ? '+' : ''}${formatYen(yoyDiff)} (${formatPercent(yoyPct)})
               </span>
-            </div>
-          </div>
-        `;
+            </div>`;
+        } else {
+          yoySummary.innerHTML = '';
+        }
       }
     }
   </script>
