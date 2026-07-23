@@ -23,7 +23,7 @@
       </div>
 
       <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0 0 1rem;">
-        毎年の収入・支出から将来の資産を試算します。退職や大きな出費の年は、その年のセルを直接書き換えてください。
+        年間の収入・支出をざっくり決めるだけで、将来の資産を試算します。退職や大きな出費など特別な年だけ、下の「特別な年」に追加してください。
       </p>
 
       <!-- 前提 -->
@@ -49,13 +49,44 @@
             <p class="form-help">資産全体が毎年何%増える想定か</p>
           </div>
           <div class="form-group" style="margin:0;">
-            <label class="form-label" for="lp-base-income">デフォルト年収 (円/年)</label>
+            <label class="form-label" for="lp-base-income">年間収入 (円/年)</label>
             <input type="number" id="lp-base-income" class="form-input" inputmode="numeric">
+            <p class="form-help">毎年の収入の目安</p>
           </div>
           <div class="form-group" style="margin:0;">
-            <label class="form-label" for="lp-base-expense">デフォルト年間支出 (円/年)</label>
+            <label class="form-label" for="lp-base-expense">年間支出 (円/年)</label>
             <input type="number" id="lp-base-expense" class="form-input" inputmode="numeric">
+            <p class="form-help">毎年の支出の目安</p>
           </div>
+        </div>
+      </div>
+
+      <!-- 特別な年 (ライフイベント) -->
+      <div class="card" style="margin-bottom: 1rem;">
+        <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.25rem;">
+          <h3 style="margin: 0; font-size: 1rem;">特別な年(ライフイベント)</h3>
+          <button type="button" class="btn btn-ghost btn-sm" id="add-event-btn">＋ 追加</button>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+          いつもと違う年だけ入力します。空欄の欄は上の「年間収入/支出」がそのまま使われます。<br>
+          例: 退職年に収入を年金額に / 子の大学入学年に支出を増やす。
+        </p>
+        <div class="table-wrap" id="events-wrap" style="display:none;">
+          <table class="table stacked-mobile">
+            <thead>
+              <tr>
+                <th style="width:90px;">年</th>
+                <th class="num">その年の収入</th>
+                <th class="num">その年の支出</th>
+                <th>メモ</th>
+                <th style="width:40px;"></th>
+              </tr>
+            </thead>
+            <tbody id="events-tbody"></tbody>
+          </table>
+        </div>
+        <div id="events-empty" style="color: var(--text-muted); font-size: 0.9rem; padding: 0.5rem 0;">
+          特別な年はまだありません。「＋ 追加」で登録できます。
         </div>
       </div>
 
@@ -67,7 +98,7 @@
         </div>
       </div>
 
-      <!-- 年表 -->
+      <!-- 結果 (読み取り専用) -->
       <h2 class="section-title">年別キャッシュフロー</h2>
       <div class="card" style="padding: 0;">
         <div class="table-wrap">
@@ -79,6 +110,7 @@
                 <th class="num">収入</th>
                 <th class="num">支出</th>
                 <th class="num">年間収支</th>
+                <th class="num">運用益</th>
                 <th class="num">年末資産</th>
                 <th>メモ</th>
               </tr>
@@ -134,49 +166,35 @@
              <p style="margin:0.5rem 0;">${escapeHtml(err?.message || 'エラーが発生しました')}</p>
              <button class="btn btn-primary btn-sm" onclick="location.reload()">再読み込み</button>
            </div>`;
-      throw err; // ここで初期化を止める
+      throw err;
     }
 
     const latestNet = trend.length ? trend[trend.length - 1].net : 0;
     const membersWithBirth = members.filter(m => m.birth_year);
 
-    // 実績から年間の目安を計算 (初期値のプリフィル用)
-    function recentAnnual() {
-      // 直近12ヶ月の支出合計
-      const last12 = trend.slice(-12);
-      const annualExpense = last12.reduce((s, t) => s + (t.expense || 0), 0);
-      return { annualExpense };
-    }
-
-    // ---- 初期値の決定 ----
+    // ---- 初期値 ----
     const nowYear = new Date().getFullYear();
     let annualIncomeSeed = 0;
     if (!settings) {
-      // 収入実績 (直近12ヶ月) をプリフィル
-      const fromDate = `${nowYear - 1}-01-01`;
       try {
-        const incs = await listIncomes({ fromDate });
-        // 直近12ヶ月ぶんに絞る
         const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - 1);
-        const cutoffStr = cutoff.toISOString().slice(0,10);
-        annualIncomeSeed = incs.filter(i => i.occurred_on >= cutoffStr).reduce((s,i)=>s+Number(i.amount),0);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        const incs = await listIncomes({ fromDate: cutoffStr });
+        annualIncomeSeed = incs.reduce((s, i) => s + Number(i.amount), 0);
       } catch { annualIncomeSeed = 0; }
     }
+    const annualExpenseSeed = trend.slice(-12).reduce((s, t) => s + (t.expense || 0), 0);
 
     const S = settings ?? {
       start_year: nowYear,
       end_year: nowYear + 40,
       base_income: annualIncomeSeed,
-      base_expense: recentAnnual().annualExpense,
+      base_expense: annualExpenseSeed,
       return_rate: 3,
       start_assets: Math.round(latestNet),
     };
 
-    // 年別上書きを Map に
-    const overrides = new Map(); // year -> {income, expense, note}
-    for (const r of yearRows) overrides.set(r.year, { income: r.income, expense: r.expense, note: r.note });
-
-    // ---- 前提フォームに反映 ----
+    // 前提フォーム
     document.getElementById('lp-start').value = S.start_year;
     document.getElementById('lp-end').value = S.end_year;
     document.getElementById('lp-start-assets').value = S.start_assets ?? Math.round(latestNet);
@@ -185,59 +203,69 @@
     document.getElementById('lp-base-income').value = S.base_income ?? 0;
     document.getElementById('lp-base-expense').value = S.base_expense ?? 0;
 
-    // 年齢ヘッダに名義名を注記
     if (membersWithBirth.length) {
       document.getElementById('age-header').textContent = '年齢 (' + membersWithBirth.map(m => m.name).join('/') + ')';
     }
 
-    // ---- 年表の描画 ----
+    // ======== 特別な年 (イベント) ========
+    const eventsTbody = document.getElementById('events-tbody');
+    const eventsWrap = document.getElementById('events-wrap');
+    const eventsEmpty = document.getElementById('events-empty');
+
+    function refreshEventsVisibility() {
+      const has = eventsTbody.children.length > 0;
+      eventsWrap.style.display = has ? 'block' : 'none';
+      eventsEmpty.style.display = has ? 'none' : 'block';
+    }
+
+    function addEventRow({ year, income, expense, note } = {}) {
+      const tr = document.createElement('tr');
+      tr.className = 'ev-row';
+      tr.innerHTML = `
+        <td data-label="年"><input type="number" class="form-input ev-year" min="2000" max="2100" style="width:90px;" value="${year ?? ''}"></td>
+        <td class="num" data-label="その年の収入"><input type="number" inputmode="numeric" class="form-input ev-inc" style="text-align:right; max-width:150px;" value="${income ?? ''}"></td>
+        <td class="num" data-label="その年の支出"><input type="number" inputmode="numeric" class="form-input ev-exp" style="text-align:right; max-width:150px;" value="${expense ?? ''}"></td>
+        <td data-label="メモ"><input type="text" class="form-input ev-note" maxlength="40" placeholder="例:退職 / 大学入学" value="${escapeHtml(note ?? '')}" style="max-width:200px;"></td>
+        <td class="actions-cell"><button type="button" class="btn btn-ghost btn-sm ev-del" title="削除">✕</button></td>
+      `;
+      tr.querySelector('.ev-del').addEventListener('click', () => { tr.remove(); refreshEventsVisibility(); recompute(); });
+      tr.querySelectorAll('input').forEach(inp => inp.addEventListener('input', recompute));
+      eventsTbody.appendChild(tr);
+      refreshEventsVisibility();
+    }
+
+    // 既存の year overrides をイベント行として表示
+    for (const r of (yearRows ?? [])) {
+      addEventRow({ year: r.year, income: r.income, expense: r.expense, note: r.note });
+    }
+
+    document.getElementById('add-event-btn').addEventListener('click', () => {
+      addEventRow({ year: nowYear + 5 });
+      recompute();
+    });
+
+    // 現在のイベントを {year: {income, expense, note}} に
+    function collectEvents() {
+      const map = new Map();
+      eventsTbody.querySelectorAll('.ev-row').forEach(tr => {
+        const y = toInt(tr.querySelector('.ev-year').value);
+        if (y == null) return;
+        map.set(y, {
+          income: toInt(tr.querySelector('.ev-inc').value),
+          expense: toInt(tr.querySelector('.ev-exp').value),
+          note: tr.querySelector('.ev-note').value.trim(),
+        });
+      });
+      return map;
+    }
+
+    // ======== 試算 ========
     const tbody = document.getElementById('lp-tbody');
     function ageCell(year) {
       if (!membersWithBirth.length) return '—';
       return membersWithBirth.map(m => `${year - m.birth_year}`).join(' / ');
     }
 
-    function buildTable() {
-      const startY = toInt(document.getElementById('lp-start').value) ?? nowYear;
-      const endY = toInt(document.getElementById('lp-end').value) ?? (nowYear + 40);
-      tbody.innerHTML = '';
-      if (endY < startY || endY - startY > 100) return;
-      for (let y = startY; y <= endY; y++) {
-        const ov = overrides.get(y) ?? {};
-        const tr = document.createElement('tr');
-        tr.dataset.year = y;
-        tr.innerHTML = `
-          <td data-label="年" class="title-cell">${y}</td>
-          <td data-label="年齢">${ageCell(y)}</td>
-          <td class="num" data-label="収入"><input type="number" inputmode="numeric" class="form-input lp-inc" data-year="${y}" style="text-align:right; max-width:150px;" value="${ov.income ?? ''}"></td>
-          <td class="num" data-label="支出"><input type="number" inputmode="numeric" class="form-input lp-exp" data-year="${y}" style="text-align:right; max-width:150px;" value="${ov.expense ?? ''}"></td>
-          <td class="num" data-label="年間収支"><span class="lp-cf" data-year="${y}">—</span></td>
-          <td class="num" data-label="年末資産"><span class="lp-end" data-year="${y}" style="font-weight:600;">—</span></td>
-          <td data-label="メモ"><input type="text" class="form-input lp-note" data-year="${y}" maxlength="40" placeholder="例:車買替" value="${escapeHtml(ov.note ?? '')}" style="max-width:180px;"></td>
-        `;
-        tbody.appendChild(tr);
-      }
-      // 入力のプレースホルダにデフォルト値を表示
-      const baseInc = toInt(document.getElementById('lp-base-income').value) ?? 0;
-      const baseExp = toInt(document.getElementById('lp-base-expense').value) ?? 0;
-      tbody.querySelectorAll('.lp-inc').forEach(i => i.placeholder = String(baseInc));
-      tbody.querySelectorAll('.lp-exp').forEach(i => i.placeholder = String(baseExp));
-
-      // 入力イベント
-      tbody.querySelectorAll('.lp-inc, .lp-exp, .lp-note').forEach(inp => {
-        inp.addEventListener('input', () => {
-          const y = parseInt(inp.dataset.year, 10);
-          const ov = overrides.get(y) ?? {};
-          if (inp.classList.contains('lp-inc')) ov.income = toInt(inp.value);
-          else if (inp.classList.contains('lp-exp')) ov.expense = toInt(inp.value);
-          else ov.note = inp.value;
-          overrides.set(y, ov);
-          recompute();
-        });
-      });
-    }
-
-    // ---- 試算 ----
     let chart = null;
     function recompute() {
       const startY = toInt(document.getElementById('lp-start').value) ?? nowYear;
@@ -247,19 +275,32 @@
       const baseExp = toInt(document.getElementById('lp-base-expense').value) ?? 0;
       let assets = toInt(document.getElementById('lp-start-assets').value) ?? 0;
 
+      if (endY < startY || endY - startY > 100) { tbody.innerHTML = ''; return; }
+
+      const events = collectEvents();
+      tbody.innerHTML = '';
       const labels = [], endAssetsArr = [];
+
       for (let y = startY; y <= endY; y++) {
-        const ov = overrides.get(y) ?? {};
-        const inc = (ov.income != null) ? ov.income : baseInc;
-        const exp = (ov.expense != null) ? ov.expense : baseExp;
+        const ev = events.get(y) ?? {};
+        const inc = (ev.income != null) ? ev.income : baseInc;
+        const exp = (ev.expense != null) ? ev.expense : baseExp;
         const cf = inc - exp;
         const growth = Math.round(assets * rate);
         const endA = assets + cf + growth;
 
-        const cfEl = tbody.querySelector(`.lp-cf[data-year="${y}"]`);
-        const endEl = tbody.querySelector(`.lp-end[data-year="${y}"]`);
-        if (cfEl) { cfEl.textContent = (cf >= 0 ? '+' : '') + formatYenShort(cf); cfEl.className = `lp-cf card-sub ${cf >= 0 ? 'up' : 'down'}`; cfEl.dataset.year = y; }
-        if (endEl) { endEl.textContent = formatYen(endA); if (endA < 0) endEl.style.color = 'var(--danger)'; else endEl.style.color = ''; }
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td data-label="年" class="title-cell">${y}</td>
+          <td data-label="年齢">${ageCell(y)}</td>
+          <td class="num" data-label="収入">${formatYen(inc)}</td>
+          <td class="num" data-label="支出">${formatYen(exp)}</td>
+          <td class="num" data-label="年間収支"><span class="card-sub ${cf >= 0 ? 'up' : 'down'}">${cf >= 0 ? '+' : ''}${formatYenShort(cf)}</span></td>
+          <td class="num" data-label="運用益"><span class="card-sub ${growth >= 0 ? 'up' : 'down'}">${growth >= 0 ? '+' : ''}${formatYenShort(growth)}</span></td>
+          <td class="num" data-label="年末資産" style="font-weight:600; ${endA < 0 ? 'color:var(--danger);' : ''}">${formatYen(endA)}</td>
+          <td data-label="メモ">${escapeHtml(ev.note ?? '')}</td>
+        `;
+        tbody.appendChild(tr);
 
         labels.push(String(y));
         endAssetsArr.push(endA);
@@ -280,7 +321,7 @@
       if (TARGET != null && TARGET > 0) {
         datasets.push({
           label: '目標', data: labels.map(() => TARGET),
-          borderColor: '#16a34a', borderDash: [6,4], borderWidth: 1.5,
+          borderColor: '#16a34a', borderDash: [6, 4], borderWidth: 1.5,
           fill: false, pointRadius: 0,
         });
       }
@@ -300,18 +341,11 @@
       });
     }
 
-    // 前提の変更 → 表とグラフ再構築
-    ['lp-start','lp-end'].forEach(id => document.getElementById(id).addEventListener('change', () => { buildTable(); recompute(); }));
-    ['lp-rate','lp-start-assets'].forEach(id => document.getElementById(id).addEventListener('input', recompute));
-    ['lp-base-income','lp-base-expense'].forEach(id => document.getElementById(id).addEventListener('input', () => {
-      const baseInc = toInt(document.getElementById('lp-base-income').value) ?? 0;
-      const baseExp = toInt(document.getElementById('lp-base-expense').value) ?? 0;
-      tbody.querySelectorAll('.lp-inc').forEach(i => i.placeholder = String(baseInc));
-      tbody.querySelectorAll('.lp-exp').forEach(i => i.placeholder = String(baseExp));
-      recompute();
-    }));
+    // 前提の変更で即再計算
+    ['lp-start','lp-end','lp-rate','lp-start-assets','lp-base-income','lp-base-expense']
+      .forEach(id => document.getElementById(id).addEventListener('input', recompute));
 
-    // ---- 保存 ----
+    // ======== 保存 ========
     document.getElementById('save-btn').addEventListener('click', withErrorToast(async () => {
       const btn = document.getElementById('save-btn');
       const startY = toInt(document.getElementById('lp-start').value);
@@ -329,11 +363,11 @@
           return_rate: parseFloat(document.getElementById('lp-rate').value) || 0,
           start_assets: toInt(document.getElementById('lp-start-assets').value),
         });
-        // 範囲外の上書きは捨てる
+        const events = collectEvents();
         const rows = [];
-        for (const [year, ov] of overrides.entries()) {
+        for (const [year, ev] of events.entries()) {
           if (year < startY || year > endY) continue;
-          rows.push({ year, income: ov.income ?? null, expense: ov.expense ?? null, note: ov.note ?? null });
+          rows.push({ year, income: ev.income ?? null, expense: ev.expense ?? null, note: ev.note ?? null });
         }
         await replaceLifePlanYears(rows);
         toast('保存しました', 'success');
@@ -342,8 +376,7 @@
       }
     }));
 
-    // ---- 初期描画 ----
-    buildTable();
+    // 初期描画
     recompute();
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
