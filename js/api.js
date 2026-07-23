@@ -460,6 +460,69 @@ export async function bulkUpsertSnapshots(rows) {
   return all;
 }
 
+// 過去の「支払予定」を支出として一括取り込み (CSV移行用)
+// records: parseLegacyCsv の records (snapshotDate, expense を使う)
+// - source='monthly_manual' で入れるので、支出推移/前年比にも純資産計算にも反映される
+// - external_id 'legacy-exp:<date>' で冪等 (再取込しても重複しない)
+// - その月に既に手入力の支出がある場合はスキップ (二重計上防止)
+export async function importLegacyExpenses(records) {
+  const profile = await getMyProfile();
+  if (!profile) throw new Error('プロファイルが見つかりません');
+
+  const rows = (records ?? []).filter(r => r.expense != null && r.expense > 0);
+  if (rows.length === 0) return { inserted: 0, skipped: 0 };
+
+  const dates = rows.map(r => r.snapshotDate);
+  const minDate = dates.reduce((a, b) => (a < b ? a : b));
+  const maxDate = dates.reduce((a, b) => (a > b ? a : b));
+
+  // 既存の monthly_manual 支出を取得 (取込分以外がある月は二重計上を避けてスキップ)
+  const { data: existing, error: exErr } = await supabase
+    .from('transactions')
+    .select('occurred_on, external_id')
+    .eq('household_id', profile.household_id)
+    .eq('source', 'monthly_manual')
+    .gte('occurred_on', minDate)
+    .lte('occurred_on', maxDate);
+  if (exErr) throw exErr;
+
+  const monthsWithOther = new Set(
+    (existing ?? [])
+      .filter(e => !String(e.external_id ?? '').startsWith('legacy-exp:'))
+      .map(e => e.occurred_on)
+  );
+
+  const toUpsert = [];
+  let skipped = 0;
+  for (const r of rows) {
+    if (monthsWithOther.has(r.snapshotDate)) { skipped++; continue; }
+    toUpsert.push({
+      household_id: profile.household_id,
+      occurred_on: r.snapshotDate,
+      amount: r.expense,
+      category: '支払予定',
+      description: '過去実績(CSV取込)',
+      source: 'monthly_manual',
+      payer_member_id: null,
+      external_id: `legacy-exp:${r.snapshotDate}`,
+    });
+  }
+
+  // external_id で冪等 upsert
+  const chunks = [];
+  for (let i = 0; i < toUpsert.length; i += 500) chunks.push(toUpsert.slice(i, i + 500));
+  let inserted = 0;
+  for (const chunk of chunks) {
+    const { data, error } = await supabase
+      .from('transactions')
+      .upsert(chunk, { onConflict: 'household_id,external_id' })
+      .select();
+    if (error) throw error;
+    inserted += (data ?? []).length;
+  }
+  return { inserted, skipped };
+}
+
 // ============================================================
 // 資産推移サマリー (ダッシュボード用)
 // ============================================================

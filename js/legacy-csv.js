@@ -33,6 +33,8 @@ export function parseLegacyCsv(text) {
 
   // 「合計」列(構成比%行を判定するため)
   const totalColIdx = header.findIndex(h => h.trim() === '合計');
+  // 「支払予定」列(= アプリの支出。あれば支出として取り込める)
+  const expenseColIdx = header.findIndex(h => h.trim() === '支払予定');
   // 月列のインデックス
   const monthIdx = 1; // 年(0), 月(1)
 
@@ -64,13 +66,19 @@ export function parseLegacyCsv(text) {
     const lastDay = new Date(year, month, 0); // month は 1-12 なので Date(year, month, 0) で前月末=対象月末
     const snapshotDate = `${year}-${String(month).padStart(2,'0')}-${String(lastDay.getDate()).padStart(2,'0')}`;
 
-    const record = { year, month, snapshotDate, columns: {} };
+    const record = { year, month, snapshotDate, columns: {}, expense: null };
     for (const [colName, idx] of Object.entries(colIndex)) {
       const raw = (cells[idx] ?? '').trim();
       if (!raw) continue;
       const num = parseFloat(raw.replace(/,/g, ''));
       if (isNaN(num)) continue;
       record.columns[colName] = Math.round(num);
+    }
+    // 支払予定 (= 支出)
+    if (expenseColIdx >= 0) {
+      const raw = (cells[expenseColIdx] ?? '').trim();
+      const num = parseFloat(raw.replace(/,/g, ''));
+      if (!isNaN(num) && num > 0) record.expense = Math.round(num);
     }
     records.push(record);
   }
@@ -88,7 +96,10 @@ export function parseLegacyCsv(text) {
     });
   }
 
-  return { records, detectedColumns };
+  // 支払予定(支出)を持つ月があるか
+  const hasExpense = records.some(r => r.expense != null && r.expense > 0);
+
+  return { records, detectedColumns, hasExpense };
 }
 
 // シンプルなCSV1行パーサ (ダブルクオート対応)

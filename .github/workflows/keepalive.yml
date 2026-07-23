@@ -96,7 +96,8 @@ jobs:
           if git diff --staged --quiet; then
             echo "変更なし。コミットをスキップ。"
           else
-            git commit -m "chore: keepalive $(date -u '+%Y-%m-%d')"
+            # [skip ci] を付けて Vercel の無駄な再デプロイを防ぐ
+            git commit -m "chore: keepalive $(date -u '+%Y-%m-%d') [skip ci]"
             git push
             echo "✅ .keepalive を更新してpush。60日タイマーをリセット。"
           fi

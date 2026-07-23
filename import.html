@@ -78,6 +78,20 @@
               </table>
             </div>
 
+            <!-- 支払予定(支出)の取り込み -->
+            <div id="expense-import-box" style="display:none; margin-top: 1rem; padding: 0.85rem 1rem; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 0.6rem;">
+              <label style="display:flex; gap: 0.6rem; align-items: flex-start; cursor: pointer;">
+                <input type="checkbox" id="import-expense-chk" checked style="margin-top: 0.2rem;">
+                <span style="font-size: 0.9rem;">
+                  <strong>「支払予定」列を過去の支出として取り込む</strong><br>
+                  <span style="color: var(--text-muted);">
+                    <span id="expense-count-label"></span>
+                    支出推移・前年同月比が埋まり、過去の純資産もスプレッドシートの「合計」と一致します。
+                  </span>
+                </span>
+              </label>
+            </div>
+
             <div class="modal-actions">
               <button type="button" class="btn btn-ghost" id="cancel-btn">キャンセル</button>
               <button type="button" class="btn btn-primary" id="import-btn">この内容で取り込む</button>
@@ -127,7 +141,7 @@
     import { requireAuth } from '/js/supabase.js';
     import { renderNav } from '/js/nav.js';
     import {
-      listAccounts, createAccount, bulkUpsertSnapshots,
+      listAccounts, createAccount, bulkUpsertSnapshots, importLegacyExpenses,
       listSnapshots, listIncomes, listTransactions, listMembers,
     } from '/js/api.js';
     import { parseLegacyCsv } from '/js/legacy-csv.js';
@@ -270,6 +284,7 @@
 
     let parsedRecords = null;
     let detectedColumns = null;
+    let parsedHasExpense = false;
 
     async function handleFile(file) {
       try {
@@ -281,6 +296,7 @@
         const result = parseLegacyCsv(text);
         parsedRecords = result.records;
         detectedColumns = result.detectedColumns;
+        parsedHasExpense = result.hasExpense;
 
         if (parsedRecords.length === 0) {
           toast('有効なデータ行が見つかりませんでした', 'error');
@@ -297,6 +313,16 @@
         const maxDate = dates[dates.length - 1];
         document.getElementById('preview-summary').innerHTML =
           `<strong>${parsedRecords.length}</strong>ヶ月分のデータを検出 (${minDate} 〜 ${maxDate})、 <strong>${detectedColumns.length}</strong>列の口座候補`;
+
+        // 支払予定(支出)取り込みボックスの表示
+        const expBox = document.getElementById('expense-import-box');
+        if (parsedHasExpense) {
+          const n = parsedRecords.filter(r => r.expense != null && r.expense > 0).length;
+          document.getElementById('expense-count-label').textContent = `「支払予定」を${n}ヶ月分検出。`;
+          expBox.style.display = 'block';
+        } else {
+          expBox.style.display = 'none';
+        }
 
         const tbody = document.getElementById('mapping-tbody');
         tbody.innerHTML = '';
@@ -353,6 +379,7 @@
     document.getElementById('cancel-btn').addEventListener('click', () => {
       parsedRecords = null;
       detectedColumns = null;
+      parsedHasExpense = false;
       document.getElementById('step1-upload').style.display = 'block';
       document.getElementById('step2-preview').style.display = 'none';
       csvInput.value = '';
@@ -421,9 +448,19 @@
       const snapshotsToInsert = Array.from(dedupe.values());
 
       ptext.textContent = `${snapshotsToInsert.length}件のスナップショットを保存中...`;
-      bar.style.width = '60%';
+      bar.style.width = '55%';
 
       await bulkUpsertSnapshots(snapshotsToInsert);
+
+      // 支払予定(支出)の取り込み
+      let expenseMsg = '';
+      const importExpense = parsedHasExpense && document.getElementById('import-expense-chk')?.checked;
+      if (importExpense) {
+        ptext.textContent = '支払予定を支出として保存中...';
+        bar.style.width = '80%';
+        const res = await importLegacyExpenses(parsedRecords);
+        expenseMsg = `、支出${res.inserted}ヶ月分` + (res.skipped > 0 ? ` (手入力済の${res.skipped}ヶ月はスキップ)` : '');
+      }
 
       bar.style.width = '100%';
       ptext.textContent = '完了';
@@ -431,7 +468,7 @@
       document.getElementById('step3-progress').style.display = 'none';
       document.getElementById('step4-done').style.display = 'block';
       document.getElementById('done-summary').textContent =
-        `${importMap.length}口座、${snapshotsToInsert.length}件のスナップショットを取り込みました`;
+        `${importMap.length}口座、${snapshotsToInsert.length}件のスナップショット${expenseMsg}を取り込みました`;
     }));
   </script>
 </body>
