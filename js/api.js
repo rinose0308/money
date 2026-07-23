@@ -7,7 +7,7 @@ import { supabase, getMyProfile } from '/js/supabase.js';
 export async function listMembers({ includeInactive = false } = {}) {
   let q = supabase
     .from('household_members')
-    .select('id, name, color, display_order, is_active, linked_profile_id')
+    .select('id, name, color, display_order, is_active, linked_profile_id, birth_year')
     .order('display_order', { ascending: true })
     .order('created_at', { ascending: true });
   if (!includeInactive) q = q.eq('is_active', true);
@@ -419,6 +419,80 @@ export async function updateHousehold({ householdId, updates }) {
     .single();
   if (error) throw error;
   return data;
+}
+
+// ============================================================
+// ライフプラン
+// ============================================================
+export async function getLifePlanSettings() {
+  const { data, error } = await supabase
+    .from('life_plan_settings')
+    .select('household_id, start_year, end_year, base_income, base_expense, return_rate, start_assets')
+    .maybeSingle();
+  if (error) throw error;
+  return data; // null なら未設定
+}
+
+export async function saveLifePlanSettings(settings) {
+  const profile = await getMyProfile();
+  if (!profile) throw new Error('プロファイルが見つかりません');
+  const row = {
+    household_id: profile.household_id,
+    start_year: settings.start_year,
+    end_year: settings.end_year,
+    base_income: settings.base_income ?? 0,
+    base_expense: settings.base_expense ?? 0,
+    return_rate: settings.return_rate ?? 0,
+    start_assets: settings.start_assets ?? null,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase
+    .from('life_plan_settings')
+    .upsert(row, { onConflict: 'household_id' })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function listLifePlanYears() {
+  const { data, error } = await supabase
+    .from('life_plan_years')
+    .select('id, year, income, expense, note')
+    .order('year', { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+// 年別上書きを全置換 (rows: [{year, income|null, expense|null, note}])
+// income/expense が両方 null かつ note 空の年は保存しない (=デフォルトに戻す)
+export async function replaceLifePlanYears(rows) {
+  const profile = await getMyProfile();
+  if (!profile) throw new Error('プロファイルが見つかりません');
+
+  const { error: delErr } = await supabase
+    .from('life_plan_years')
+    .delete()
+    .eq('household_id', profile.household_id);
+  if (delErr) throw delErr;
+
+  const meaningful = rows.filter(r =>
+    r.income != null || r.expense != null || (r.note && r.note.trim())
+  );
+  if (meaningful.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('life_plan_years')
+    .insert(meaningful.map(r => ({
+      household_id: profile.household_id,
+      year: r.year,
+      income: r.income ?? null,
+      expense: r.expense ?? null,
+      note: (r.note && r.note.trim()) ? r.note.trim() : null,
+    })))
+    .select();
+  if (error) throw error;
+  return data ?? [];
 }
 
 // 一括 upsert (CSVインポート用)

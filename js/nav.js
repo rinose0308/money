@@ -4,6 +4,7 @@ import { signOut } from '/js/supabase.js';
 const links = [
   { href: '/dashboard.html',   label: 'ダッシュボード' },
   { href: '/monthly.html',     label: '月次入力' },
+  { href: '/lifeplan.html',    label: 'ライフプラン' },
   { href: '/import.html',      label: '取り込み' },
   { href: '/settings.html',    label: '設定' },
 ];

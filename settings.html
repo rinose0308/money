@@ -73,6 +73,7 @@
                 <th style="width:30px;"></th>
                 <th>名義</th>
                 <th style="width:80px;">色</th>
+                <th style="width:90px;">生年</th>
                 <th></th>
               </tr>
             </thead>
@@ -366,6 +367,7 @@
           <td><span style="display:inline-block; width:14px; height:14px; border-radius:50%; background:${escapeHtml(m.color || '#3b82f6')};"></span></td>
           <td><input type="text" class="form-input mem-name" data-id="${m.id}" value="${escapeHtml(m.name)}" maxlength="20" style="max-width: 200px;"></td>
           <td><input type="color" class="mem-color" data-id="${m.id}" value="${escapeHtml(m.color || '#3b82f6')}" style="width:50px; height:32px; padding:2px; border:1px solid var(--border); border-radius:0.4rem; cursor:pointer;"></td>
+          <td><input type="number" class="form-input mem-birth" data-id="${m.id}" value="${m.birth_year ?? ''}" placeholder="例:1988" min="1900" max="2100" style="width:80px;"></td>
           <td style="display:flex; gap:0.3rem;">
             <button type="button" class="btn btn-ghost btn-sm save-mem" data-id="${m.id}">保存</button>
             <button type="button" class="btn btn-danger btn-sm del-mem" data-id="${m.id}">削除</button>
@@ -377,8 +379,10 @@
         const id = b.dataset.id;
         const name = tbody.querySelector(`.mem-name[data-id="${id}"]`).value.trim();
         const color = tbody.querySelector(`.mem-color[data-id="${id}"]`).value;
+        const birthRaw = tbody.querySelector(`.mem-birth[data-id="${id}"]`).value.trim();
+        const birth_year = birthRaw ? parseInt(birthRaw, 10) : null;
         if (!name) { toast('名前を入力してください', 'error'); return; }
-        await updateMember(id, { name, color });
+        await updateMember(id, { name, color, birth_year: (birth_year && !isNaN(birth_year)) ? birth_year : null });
         toast('更新しました', 'success');
         await refreshMembers(); await refreshAccounts();
       })));

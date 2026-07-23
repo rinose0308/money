@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>ライフプラン | 我が家マネー</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="我が家マネー">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <main class="container">
+    <div id="loading" class="loading"><div class="spinner"></div><p>読み込み中...</p></div>
+
+    <div id="content" style="display:none;">
+      <div class="sticky-toolbar">
+        <h1>ライフプラン</h1>
+        <button type="button" class="btn btn-primary" id="save-btn">💾 保存</button>
+      </div>
+
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0 0 1rem;">
+        毎年の収入・支出から将来の資産を試算します。退職や大きな出費の年は、その年のセルを直接書き換えてください。
+      </p>
+
+      <!-- 前提 -->
+      <div class="card" style="margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 0.75rem; font-size: 1rem;">前提</h3>
+        <div class="grid cols-2" style="gap: 0.75rem;">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-start">開始年</label>
+            <input type="number" id="lp-start" class="form-input" min="2000" max="2100">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-end">終了年</label>
+            <input type="number" id="lp-end" class="form-input" min="2000" max="2100">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-start-assets">開始資産 (円)</label>
+            <input type="number" id="lp-start-assets" class="form-input" inputmode="numeric">
+            <p class="form-help" id="lp-start-assets-help"></p>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-rate">想定利回り (%)</label>
+            <input type="number" id="lp-rate" class="form-input" step="0.1" inputmode="decimal" placeholder="例: 3">
+            <p class="form-help">資産全体が毎年何%増える想定か</p>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-base-income">デフォルト年収 (円/年)</label>
+            <input type="number" id="lp-base-income" class="form-input" inputmode="numeric">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-base-expense">デフォルト年間支出 (円/年)</label>
+            <input type="number" id="lp-base-expense" class="form-input" inputmode="numeric">
+          </div>
+        </div>
+      </div>
+
+      <!-- グラフ -->
+      <h2 class="section-title">資産予測</h2>
+      <div class="card" style="margin-bottom: 1rem;">
+        <div class="chart-container" style="height: 300px;">
+          <canvas id="lp-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- 年表 -->
+      <h2 class="section-title">年別キャッシュフロー</h2>
+      <div class="card" style="padding: 0;">
+        <div class="table-wrap">
+          <table class="table stacked-mobile" id="lp-table">
+            <thead>
+              <tr>
+                <th>年</th>
+                <th id="age-header">年齢</th>
+                <th class="num">収入</th>
+                <th class="num">支出</th>
+                <th class="num">年間収支</th>
+                <th class="num">年末資産</th>
+                <th>メモ</th>
+              </tr>
+            </thead>
+            <tbody id="lp-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { requireAuth } from '/js/supabase.js';
+    import { renderNav } from '/js/nav.js';
+    import {
+      listMembers, getAssetTrend, listIncomes,
+      getLifePlanSettings, saveLifePlanSettings, listLifePlanYears, replaceLifePlanYears,
+    } from '/js/api.js';
+    import { formatYen, formatYenShort, toast, withErrorToast } from '/js/utils.js';
+
+    const auth = await requireAuth();
+    if (!auth) throw new Error('not authenticated');
+    renderNav('/lifeplan.html');
+
+    const TARGET = auth.profile.households.target_total_amount;
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+    }
+    const toInt = (v) => { const n = parseInt(String(v).replace(/,/g,''), 10); return isNaN(n) ? null : n; };
+
+    // ---- データ取得 ----
+    const [members, trend, settings, yearRows] = await Promise.all([
+      listMembers(),
+      getAssetTrend(),
+      getLifePlanSettings(),
+      listLifePlanYears(),
+    ]);
+
+    const latestNet = trend.length ? trend[trend.length - 1].net : 0;
+    const membersWithBirth = members.filter(m => m.birth_year);
+
+    // 実績から年間の目安を計算 (初期値のプリフィル用)
+    function recentAnnual() {
+      // 直近12ヶ月の支出合計
+      const last12 = trend.slice(-12);
+      const annualExpense = last12.reduce((s, t) => s + (t.expense || 0), 0);
+      return { annualExpense };
+    }
+
+    // ---- 初期値の決定 ----
+    const nowYear = new Date().getFullYear();
+    let annualIncomeSeed = 0;
+    if (!settings) {
+      // 収入実績 (直近12ヶ月) をプリフィル
+      const fromDate = `${nowYear - 1}-01-01`;
+      try {
+        const incs = await listIncomes({ fromDate });
+        // 直近12ヶ月ぶんに絞る
+        const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - 1);
+        const cutoffStr = cutoff.toISOString().slice(0,10);
+        annualIncomeSeed = incs.filter(i => i.occurred_on >= cutoffStr).reduce((s,i)=>s+Number(i.amount),0);
+      } catch { annualIncomeSeed = 0; }
+    }
+
+    const S = settings ?? {
+      start_year: nowYear,
+      end_year: nowYear + 40,
+      base_income: annualIncomeSeed,
+      base_expense: recentAnnual().annualExpense,
+      return_rate: 3,
+      start_assets: Math.round(latestNet),
+    };
+
+    // 年別上書きを Map に
+    const overrides = new Map(); // year -> {income, expense, note}
+    for (const r of yearRows) overrides.set(r.year, { income: r.income, expense: r.expense, note: r.note });
+
+    // ---- 前提フォームに反映 ----
+    document.getElementById('lp-start').value = S.start_year;
+    document.getElementById('lp-end').value = S.end_year;
+    document.getElementById('lp-start-assets').value = S.start_assets ?? Math.round(latestNet);
+    document.getElementById('lp-start-assets-help').textContent = `現在の純資産: ${formatYen(Math.round(latestNet))}`;
+    document.getElementById('lp-rate').value = S.return_rate ?? 0;
+    document.getElementById('lp-base-income').value = S.base_income ?? 0;
+    document.getElementById('lp-base-expense').value = S.base_expense ?? 0;
+
+    // 年齢ヘッダに名義名を注記
+    if (membersWithBirth.length) {
+      document.getElementById('age-header').textContent = '年齢 (' + membersWithBirth.map(m => m.name).join('/') + ')';
+    }
+
+    // ---- 年表の描画 ----
+    const tbody = document.getElementById('lp-tbody');
+    function ageCell(year) {
+      if (!membersWithBirth.length) return '—';
+      return membersWithBirth.map(m => `${year - m.birth_year}`).join(' / ');
+    }
+
+    function buildTable() {
+      const startY = toInt(document.getElementById('lp-start').value) ?? nowYear;
+      const endY = toInt(document.getElementById('lp-end').value) ?? (nowYear + 40);
+      tbody.innerHTML = '';
+      if (endY < startY || endY - startY > 100) return;
+      for (let y = startY; y <= endY; y++) {
+        const ov = overrides.get(y) ?? {};
+        const tr = document.createElement('tr');
+        tr.dataset.year = y;
+        tr.innerHTML = `
+          <td data-label="年" class="title-cell">${y}</td>
+          <td data-label="年齢">${ageCell(y)}</td>
+          <td class="num" data-label="収入"><input type="number" inputmode="numeric" class="form-input lp-inc" data-year="${y}" style="text-align:right; max-width:150px;" value="${ov.income ?? ''}"></td>
+          <td class="num" data-label="支出"><input type="number" inputmode="numeric" class="form-input lp-exp" data-year="${y}" style="text-align:right; max-width:150px;" value="${ov.expense ?? ''}"></td>
+          <td class="num" data-label="年間収支"><span class="lp-cf" data-year="${y}">—</span></td>
+          <td class="num" data-label="年末資産"><span class="lp-end" data-year="${y}" style="font-weight:600;">—</span></td>
+          <td data-label="メモ"><input type="text" class="form-input lp-note" data-year="${y}" maxlength="40" placeholder="例:車買替" value="${escapeHtml(ov.note ?? '')}" style="max-width:180px;"></td>
+        `;
+        tbody.appendChild(tr);
+      }
+      // 入力のプレースホルダにデフォルト値を表示
+      const baseInc = toInt(document.getElementById('lp-base-income').value) ?? 0;
+      const baseExp = toInt(document.getElementById('lp-base-expense').value) ?? 0;
+      tbody.querySelectorAll('.lp-inc').forEach(i => i.placeholder = String(baseInc));
+      tbody.querySelectorAll('.lp-exp').forEach(i => i.placeholder = String(baseExp));
+
+      // 入力イベント
+      tbody.querySelectorAll('.lp-inc, .lp-exp, .lp-note').forEach(inp => {
+        inp.addEventListener('input', () => {
+          const y = parseInt(inp.dataset.year, 10);
+          const ov = overrides.get(y) ?? {};
+          if (inp.classList.contains('lp-inc')) ov.income = toInt(inp.value);
+          else if (inp.classList.contains('lp-exp')) ov.expense = toInt(inp.value);
+          else ov.note = inp.value;
+          overrides.set(y, ov);
+          recompute();
+        });
+      });
+    }
+
+    // ---- 試算 ----
+    let chart = null;
+    function recompute() {
+      const startY = toInt(document.getElementById('lp-start').value) ?? nowYear;
+      const endY = toInt(document.getElementById('lp-end').value) ?? (nowYear + 40);
+      const rate = (parseFloat(document.getElementById('lp-rate').value) || 0) / 100;
+      const baseInc = toInt(document.getElementById('lp-base-income').value) ?? 0;
+      const baseExp = toInt(document.getElementById('lp-base-expense').value) ?? 0;
+      let assets = toInt(document.getElementById('lp-start-assets').value) ?? 0;
+
+      const labels = [], endAssetsArr = [];
+      for (let y = startY; y <= endY; y++) {
+        const ov = overrides.get(y) ?? {};
+        const inc = (ov.income != null) ? ov.income : baseInc;
+        const exp = (ov.expense != null) ? ov.expense : baseExp;
+        const cf = inc - exp;
+        const growth = Math.round(assets * rate);
+        const endA = assets + cf + growth;
+
+        const cfEl = tbody.querySelector(`.lp-cf[data-year="${y}"]`);
+        const endEl = tbody.querySelector(`.lp-end[data-year="${y}"]`);
+        if (cfEl) { cfEl.textContent = (cf >= 0 ? '+' : '') + formatYenShort(cf); cfEl.className = `lp-cf card-sub ${cf >= 0 ? 'up' : 'down'}`; cfEl.dataset.year = y; }
+        if (endEl) { endEl.textContent = formatYen(endA); if (endA < 0) endEl.style.color = 'var(--danger)'; else endEl.style.color = ''; }
+
+        labels.push(String(y));
+        endAssetsArr.push(endA);
+        assets = endA;
+      }
+      drawChart(labels, endAssetsArr);
+    }
+
+    function drawChart(labels, endAssetsArr) {
+      const ctx = document.getElementById('lp-chart').getContext('2d');
+      const datasets = [{
+        label: '年末資産(予測)',
+        data: endAssetsArr,
+        borderColor: '#2563eb',
+        backgroundColor: 'rgba(37,99,235,0.12)',
+        fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
+      }];
+      if (TARGET != null && TARGET > 0) {
+        datasets.push({
+          label: '目標', data: labels.map(() => TARGET),
+          borderColor: '#16a34a', borderDash: [6,4], borderWidth: 1.5,
+          fill: false, pointRadius: 0,
+        });
+      }
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
+            tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${formatYen(c.parsed.y)}` } },
+          },
+          scales: { y: { ticks: { callback: (v) => formatYenShort(v) } } },
+        },
+      });
+    }
+
+    // 前提の変更 → 表とグラフ再構築
+    ['lp-start','lp-end'].forEach(id => document.getElementById(id).addEventListener('change', () => { buildTable(); recompute(); }));
+    ['lp-rate','lp-start-assets'].forEach(id => document.getElementById(id).addEventListener('input', recompute));
+    ['lp-base-income','lp-base-expense'].forEach(id => document.getElementById(id).addEventListener('input', () => {
+      const baseInc = toInt(document.getElementById('lp-base-income').value) ?? 0;
+      const baseExp = toInt(document.getElementById('lp-base-expense').value) ?? 0;
+      tbody.querySelectorAll('.lp-inc').forEach(i => i.placeholder = String(baseInc));
+      tbody.querySelectorAll('.lp-exp').forEach(i => i.placeholder = String(baseExp));
+      recompute();
+    }));
+
+    // ---- 保存 ----
+    document.getElementById('save-btn').addEventListener('click', withErrorToast(async () => {
+      const btn = document.getElementById('save-btn');
+      const startY = toInt(document.getElementById('lp-start').value);
+      const endY = toInt(document.getElementById('lp-end').value);
+      if (!startY || !endY || endY < startY) { toast('開始年・終了年を正しく入力してください', 'error'); return; }
+      if (endY - startY > 100) { toast('期間が長すぎます (最大100年)', 'error'); return; }
+
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 保存中...';
+      try {
+        await saveLifePlanSettings({
+          start_year: startY,
+          end_year: endY,
+          base_income: toInt(document.getElementById('lp-base-income').value) ?? 0,
+          base_expense: toInt(document.getElementById('lp-base-expense').value) ?? 0,
+          return_rate: parseFloat(document.getElementById('lp-rate').value) || 0,
+          start_assets: toInt(document.getElementById('lp-start-assets').value),
+        });
+        // 範囲外の上書きは捨てる
+        const rows = [];
+        for (const [year, ov] of overrides.entries()) {
+          if (year < startY || year > endY) continue;
+          rows.push({ year, income: ov.income ?? null, expense: ov.expense ?? null, note: ov.note ?? null });
+        }
+        await replaceLifePlanYears(rows);
+        toast('保存しました', 'success');
+      } finally {
+        btn.disabled = false; btn.innerHTML = '💾 保存';
+      }
+    }));
+
+    // ---- 初期描画 ----
+    buildTable();
+    recompute();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+  </script>
+</body>
+</html>
