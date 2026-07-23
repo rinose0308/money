@@ -111,12 +111,31 @@
     const toInt = (v) => { const n = parseInt(String(v).replace(/,/g,''), 10); return isNaN(n) ? null : n; };
 
     // ---- データ取得 ----
-    const [members, trend, settings, yearRows] = await Promise.all([
-      listMembers(),
-      getAssetTrend(),
-      getLifePlanSettings(),
-      listLifePlanYears(),
-    ]);
+    let members, trend, settings, yearRows;
+    try {
+      [members, trend, settings, yearRows] = await Promise.all([
+        listMembers(),
+        getAssetTrend(),
+        getLifePlanSettings(),
+        listLifePlanYears(),
+      ]);
+    } catch (err) {
+      console.error(err);
+      const isMissing = /life_plan|birth_year|schema cache|does not exist|PGRST205|42703/i.test(err?.message || '');
+      document.getElementById('loading').innerHTML = isMissing
+        ? `<div class="empty-state" style="max-width:520px;margin:0 auto;">
+             <h3>データベースの準備が必要です</h3>
+             <p style="margin:0.5rem 0;">ライフプラン用のテーブルがまだ作成されていません。<br>
+             Supabase の SQL Editor で <code>supabase/migrations/0006_life_plan.sql</code> を実行してください。</p>
+             <button class="btn btn-primary btn-sm" onclick="location.reload()">実行したら再読み込み</button>
+           </div>`
+        : `<div class="empty-state" style="max-width:520px;margin:0 auto;">
+             <h3>読み込みに失敗しました</h3>
+             <p style="margin:0.5rem 0;">${escapeHtml(err?.message || 'エラーが発生しました')}</p>
+             <button class="btn btn-primary btn-sm" onclick="location.reload()">再読み込み</button>
+           </div>`;
+      throw err; // ここで初期化を止める
+    }
 
     const latestNet = trend.length ? trend[trend.length - 1].net : 0;
     const membersWithBirth = members.filter(m => m.birth_year);
