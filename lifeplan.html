@@ -90,6 +90,38 @@
         </div>
       </div>
 
+      <!-- 住宅ローン -->
+      <div class="card" style="margin-bottom: 1rem;">
+        <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.25rem;">
+          <h3 style="margin: 0; font-size: 1rem;">住宅ローン</h3>
+          <button type="button" class="btn btn-ghost btn-sm" id="add-loan-btn">＋ 追加</button>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+          ペアローンは2件登録してください。現在残高・金利・借入年・返済年数から毎年の返済額を自動計算し、資産予測から差し引きます。<br>
+          <span style="color: var(--warning);">※ 上の「年間支出」にローン返済を含めている場合は二重計上になります。含めない金額にしてください。</span>
+        </p>
+        <div class="table-wrap" id="loans-wrap" style="display:none;">
+          <table class="table stacked-mobile">
+            <thead>
+              <tr>
+                <th>名義</th>
+                <th class="num">現在残高</th>
+                <th class="num">金利(%)</th>
+                <th class="num">借入年</th>
+                <th class="num">返済年数</th>
+                <th class="num">年間返済</th>
+                <th class="num">完済年</th>
+                <th style="width:40px;"></th>
+              </tr>
+            </thead>
+            <tbody id="loans-tbody"></tbody>
+          </table>
+        </div>
+        <div id="loans-empty" style="color: var(--text-muted); font-size: 0.9rem; padding: 0.5rem 0;">
+          住宅ローンはまだありません。「＋ 追加」で登録できます。
+        </div>
+      </div>
+
       <!-- グラフ -->
       <h2 class="section-title">資産予測</h2>
       <div class="card" style="margin-bottom: 1rem;">
@@ -110,8 +142,10 @@
                 <th class="num">収入</th>
                 <th class="num">支出</th>
                 <th class="num">年間収支</th>
+                <th class="num loan-col" style="display:none;">ローン返済</th>
                 <th class="num">運用益</th>
                 <th class="num">年末資産</th>
+                <th class="num loan-col" style="display:none;">ローン残高</th>
                 <th>メモ</th>
               </tr>
             </thead>
@@ -128,6 +162,7 @@
     import {
       listMembers, getAssetTrend, listIncomes,
       getLifePlanSettings, saveLifePlanSettings, listLifePlanYears, replaceLifePlanYears,
+      listLifePlanLoans, replaceLifePlanLoans,
     } from '/js/api.js';
     import { formatYen, formatYenShort, toast, withErrorToast } from '/js/utils.js';
 
@@ -143,13 +178,14 @@
     const toInt = (v) => { const n = parseInt(String(v).replace(/,/g,''), 10); return isNaN(n) ? null : n; };
 
     // ---- データ取得 ----
-    let members, trend, settings, yearRows;
+    let members, trend, settings, yearRows, loanRows;
     try {
-      [members, trend, settings, yearRows] = await Promise.all([
+      [members, trend, settings, yearRows, loanRows] = await Promise.all([
         listMembers(),
         getAssetTrend(),
         getLifePlanSettings(),
         listLifePlanYears(),
+        listLifePlanLoans(),
       ]);
     } catch (err) {
       console.error(err);
@@ -158,7 +194,7 @@
         ? `<div class="empty-state" style="max-width:520px;margin:0 auto;">
              <h3>データベースの準備が必要です</h3>
              <p style="margin:0.5rem 0;">ライフプラン用のテーブルがまだ作成されていません。<br>
-             Supabase の SQL Editor で <code>supabase/migrations/0006_life_plan.sql</code> を実行してください。</p>
+             Supabase の SQL Editor で <code>0006_life_plan.sql</code> と <code>0007_life_plan_loans.sql</code> を実行してください。</p>
              <button class="btn btn-primary btn-sm" onclick="location.reload()">実行したら再読み込み</button>
            </div>`
         : `<div class="empty-state" style="max-width:520px;margin:0 auto;">
@@ -270,6 +306,79 @@
       return map;
     }
 
+    // ======== 住宅ローン ========
+    const loansTbody = document.getElementById('loans-tbody');
+    const loansWrap = document.getElementById('loans-wrap');
+    const loansEmpty = document.getElementById('loans-empty');
+
+    function refreshLoansVisibility() {
+      const has = loansTbody.children.length > 0;
+      loansWrap.style.display = has ? 'block' : 'none';
+      loansEmpty.style.display = has ? 'none' : 'block';
+      // ローン列の表示切替
+      document.querySelectorAll('.loan-col').forEach(el => el.style.display = has ? '' : 'none');
+    }
+
+    // 年間返済額(元利均等・年次)。残り年数で現在残高を返済しきる額
+    function annualPayment(balance, ratePct, completeYear, fromYear) {
+      const N = (completeYear != null) ? (completeYear - fromYear) : null;
+      if (!N || N <= 0 || !balance || balance <= 0) return 0;
+      const ra = (ratePct || 0) / 100;
+      if (ra === 0) return Math.round(balance / N);
+      return Math.round(balance * ra / (1 - Math.pow(1 + ra, -N)));
+    }
+
+    function memberOptions(selectedId) {
+      return '<option value="">(指定なし)</option>' +
+        members.map(m => `<option value="${m.id}"${m.id === selectedId ? ' selected' : ''}>${escapeHtml(m.name)}</option>`).join('');
+    }
+
+    function addLoanRow(loan = {}) {
+      const tr = document.createElement('tr');
+      tr.className = 'loan-row';
+      tr.innerHTML = `
+        <td data-label="名義"><select class="form-select ln-member" style="min-width:110px;">${memberOptions(loan.member_id)}</select></td>
+        <td class="num" data-label="現在残高"><input type="number" inputmode="numeric" class="form-input ln-bal" style="text-align:right; max-width:150px;" value="${loan.current_balance ?? ''}"></td>
+        <td class="num" data-label="金利(%)"><input type="number" step="0.01" inputmode="decimal" class="form-input ln-rate" style="text-align:right; max-width:90px;" value="${loan.interest_rate ?? ''}"></td>
+        <td class="num" data-label="借入年"><input type="number" class="form-input ln-start" min="1990" max="2100" style="text-align:right; max-width:90px;" value="${loan.start_year ?? ''}"></td>
+        <td class="num" data-label="返済年数"><input type="number" class="form-input ln-term" min="1" max="50" style="text-align:right; max-width:80px;" value="${loan.term_years ?? ''}"></td>
+        <td class="num" data-label="年間返済"><span class="ln-pay" style="font-variant-numeric:tabular-nums;">—</span></td>
+        <td class="num" data-label="完済年"><span class="ln-done">—</span></td>
+        <td class="actions-cell"><button type="button" class="btn btn-ghost btn-sm ln-del" title="削除">✕</button></td>
+      `;
+      tr.querySelector('.ln-del').addEventListener('click', () => { tr.remove(); refreshLoansVisibility(); recompute(); });
+      tr.querySelectorAll('input, select').forEach(inp => inp.addEventListener('input', recompute));
+      loansTbody.appendChild(tr);
+      refreshLoansVisibility();
+    }
+
+    for (const l of (loanRows ?? [])) {
+      addLoanRow({
+        member_id: l.member_id, current_balance: l.current_balance,
+        interest_rate: l.interest_rate, start_year: l.start_year, term_years: l.term_years,
+      });
+    }
+
+    document.getElementById('add-loan-btn').addEventListener('click', () => { addLoanRow(); recompute(); });
+
+    // 現在のローン一覧
+    function collectLoans() {
+      const loans = [];
+      loansTbody.querySelectorAll('.loan-row').forEach(tr => {
+        const bal = toInt(tr.querySelector('.ln-bal').value);
+        if (bal == null || bal <= 0) return;
+        loans.push({
+          member_id: tr.querySelector('.ln-member').value || null,
+          current_balance: bal,
+          interest_rate: parseFloat(tr.querySelector('.ln-rate').value) || 0,
+          start_year: toInt(tr.querySelector('.ln-start').value),
+          term_years: toInt(tr.querySelector('.ln-term').value),
+          _row: tr,
+        });
+      });
+      return loans;
+    }
+
     // ======== 試算 ========
     const tbody = document.getElementById('lp-tbody');
     function ageCell(year) {
@@ -289,16 +398,52 @@
       if (endY < startY || endY - startY > 100) { tbody.innerHTML = ''; return; }
 
       const events = collectEvents();
+
+      // ローン: 各ローンの年間返済額と借入完済年を確定し、返済表示も更新
+      const loans = collectLoans();
+      const hasLoans = loans.length > 0;
+      for (const ln of loans) {
+        ln.completeYear = (ln.start_year != null && ln.term_years != null) ? (ln.start_year + ln.term_years) : null;
+        ln.payment = annualPayment(ln.current_balance, ln.interest_rate, ln.completeYear, startY);
+        ln.balance = ln.current_balance;
+        // ローン表の計算列を更新
+        if (ln._row) {
+          ln._row.querySelector('.ln-pay').textContent = ln.payment > 0 ? formatYen(ln.payment) : '—';
+          ln._row.querySelector('.ln-done').textContent = ln.completeYear ?? '—';
+        }
+      }
+
       tbody.innerHTML = '';
-      const labels = [], endAssetsArr = [];
+      const labels = [], endAssetsArr = [], netWorthArr = [], loanBalArr = [];
 
       for (let y = startY; y <= endY; y++) {
         const ev = events.get(y) ?? {};
         const inc = (ev.income != null) ? ev.income : baseInc;
         const exp = (ev.expense != null) ? ev.expense : baseExp;
-        const cf = inc - exp;
+
+        // この年のローン返済と残高
+        let loanPay = 0, loanBal = 0;
+        for (const ln of loans) {
+          if (ln.completeYear != null && y < ln.completeYear && ln.balance > 0) {
+            const interest = Math.round(ln.balance * (ln.interest_rate || 0) / 100);
+            let pay = ln.payment;
+            let principal = pay - interest;
+            if (principal >= ln.balance) { pay = ln.balance + interest; principal = ln.balance; } // 最終年
+            ln.balance = Math.max(0, ln.balance - principal);
+            loanPay += pay;
+          }
+          loanBal += ln.balance;
+        }
+
+        const cf = inc - exp - loanPay;
         const growth = Math.round(assets * rate);
         const endA = assets + cf + growth;
+        const netWorth = endA - loanBal;
+
+        const loanPayCell = hasLoans
+          ? `<td class="num loan-col" data-label="ローン返済">${loanPay > 0 ? '-' + formatYenShort(loanPay) : '—'}</td>` : '';
+        const loanBalCell = hasLoans
+          ? `<td class="num loan-col" data-label="ローン残高">${loanBal > 0 ? formatYen(loanBal) : '完済'}</td>` : '';
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
@@ -307,28 +452,42 @@
           <td class="num" data-label="収入">${formatYen(inc)}</td>
           <td class="num" data-label="支出">${formatYen(exp)}</td>
           <td class="num" data-label="年間収支"><span class="card-sub ${cf >= 0 ? 'up' : 'down'}">${cf >= 0 ? '+' : ''}${formatYenShort(cf)}</span></td>
+          ${loanPayCell}
           <td class="num" data-label="運用益"><span class="card-sub ${growth >= 0 ? 'up' : 'down'}">${growth >= 0 ? '+' : ''}${formatYenShort(growth)}</span></td>
           <td class="num" data-label="年末資産" style="font-weight:600; ${endA < 0 ? 'color:var(--danger);' : ''}">${formatYen(endA)}</td>
+          ${loanBalCell}
           <td data-label="メモ">${escapeHtml(ev.note ?? '')}</td>
         `;
         tbody.appendChild(tr);
 
         labels.push(String(y));
         endAssetsArr.push(endA);
+        netWorthArr.push(netWorth);
+        loanBalArr.push(loanBal);
         assets = endA;
       }
-      drawChart(labels, endAssetsArr);
+      refreshLoansVisibility();
+      drawChart(labels, endAssetsArr, hasLoans ? netWorthArr : null);
     }
 
-    function drawChart(labels, endAssetsArr) {
+    function drawChart(labels, endAssetsArr, netWorthArr) {
       const ctx = document.getElementById('lp-chart').getContext('2d');
       const datasets = [{
-        label: '年末資産(予測)',
+        label: netWorthArr ? '金融資産' : '年末資産(予測)',
         data: endAssetsArr,
         borderColor: '#2563eb',
         backgroundColor: 'rgba(37,99,235,0.12)',
         fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
       }];
+      if (netWorthArr) {
+        datasets.push({
+          label: '純資産(ローン差引)',
+          data: netWorthArr,
+          borderColor: '#8b5cf6',
+          backgroundColor: 'transparent',
+          fill: false, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
+        });
+      }
       if (TARGET != null && TARGET > 0) {
         datasets.push({
           label: '目標', data: labels.map(() => TARGET),
@@ -381,6 +540,12 @@
           rows.push({ year, income: ev.income ?? null, expense: ev.expense ?? null, note: ev.note ?? null });
         }
         await replaceLifePlanYears(rows);
+        // ローン
+        const loans = collectLoans().map(l => ({
+          member_id: l.member_id, current_balance: l.current_balance,
+          interest_rate: l.interest_rate, start_year: l.start_year, term_years: l.term_years,
+        }));
+        await replaceLifePlanLoans(loans);
         toast('保存しました', 'success');
       } finally {
         btn.disabled = false; btn.innerHTML = '💾 保存';

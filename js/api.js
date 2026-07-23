@@ -464,6 +464,48 @@ export async function listLifePlanYears() {
   return data ?? [];
 }
 
+// ライフプラン: 住宅ローン
+export async function listLifePlanLoans() {
+  const { data, error } = await supabase
+    .from('life_plan_loans')
+    .select('id, member_id, label, current_balance, interest_rate, start_year, term_years, display_order')
+    .order('display_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+// ローンを全置換 (rows: [{member_id, label, current_balance, interest_rate, start_year, term_years}])
+export async function replaceLifePlanLoans(rows) {
+  const profile = await getMyProfile();
+  if (!profile) throw new Error('プロファイルが見つかりません');
+
+  const { error: delErr } = await supabase
+    .from('life_plan_loans')
+    .delete()
+    .eq('household_id', profile.household_id);
+  if (delErr) throw delErr;
+
+  const valid = rows.filter(r => r.current_balance != null && r.current_balance > 0);
+  if (valid.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('life_plan_loans')
+    .insert(valid.map((r, idx) => ({
+      household_id: profile.household_id,
+      member_id: r.member_id ?? null,
+      label: r.label ?? null,
+      current_balance: r.current_balance,
+      interest_rate: r.interest_rate ?? 0,
+      start_year: r.start_year ?? null,
+      term_years: r.term_years ?? null,
+      display_order: idx,
+    })))
+    .select();
+  if (error) throw error;
+  return data ?? [];
+}
+
 // 年別上書きを全置換 (rows: [{year, income|null, expense|null, note}])
 // income/expense が両方 null かつ note 空の年は保存しない (=デフォルトに戻す)
 export async function replaceLifePlanYears(rows) {
