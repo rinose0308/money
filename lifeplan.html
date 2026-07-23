@@ -51,7 +51,7 @@
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-base-income">年間収入 (円/年)</label>
             <input type="number" id="lp-base-income" class="form-input" inputmode="numeric">
-            <p class="form-help">毎年の収入の目安</p>
+            <p class="form-help" id="lp-income-help">毎年の収入の目安</p>
           </div>
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-base-expense">年間支出 (円/年)</label>
@@ -184,6 +184,13 @@
       } catch { annualIncomeSeed = 0; }
     }
     const annualExpenseSeed = trend.slice(-12).reduce((s, t) => s + (t.expense || 0), 0);
+    // 収入の実績がない場合は支出と同額(収支トントン)を仮置き。
+    // income=0 だと初期表示がいきなり赤字破綻して分かりにくいため。
+    let incomeIsPlaceholder = false;
+    if (!settings && annualIncomeSeed === 0 && annualExpenseSeed > 0) {
+      annualIncomeSeed = annualExpenseSeed;
+      incomeIsPlaceholder = true;
+    }
 
     const S = settings ?? {
       start_year: nowYear,
@@ -202,6 +209,10 @@
     document.getElementById('lp-rate').value = S.return_rate ?? 0;
     document.getElementById('lp-base-income').value = S.base_income ?? 0;
     document.getElementById('lp-base-expense').value = S.base_expense ?? 0;
+    if (incomeIsPlaceholder) {
+      document.getElementById('lp-income-help').textContent = '⚠️ 収入の実績がないため、仮に支出と同額を入れています。実際の年収を入力してください。';
+      document.getElementById('lp-income-help').style.color = 'var(--warning)';
+    }
 
     if (membersWithBirth.length) {
       document.getElementById('age-header').textContent = '年齢 (' + membersWithBirth.map(m => m.name).join('/') + ')';
