@@ -117,6 +117,23 @@
 
       <!-- 支出推移 -->
       <h2 class="section-title">支出推移</h2>
+      <div id="expense-avg-card" class="card" style="display:none; margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 0.75rem; font-size: 1rem;">平均支出額 (月あたり)</h3>
+        <div class="grid cols-2">
+          <div>
+            <p class="card-title" id="avg-cur-label">今年</p>
+            <p class="card-value" id="avg-cur" style="font-size: 1.5rem;">—</p>
+            <p class="card-sub" id="avg-cur-sub">—</p>
+          </div>
+          <div>
+            <p class="card-title" id="avg-prev-label">前年</p>
+            <p class="card-value" id="avg-prev" style="font-size: 1.5rem;">—</p>
+            <p class="card-sub" id="avg-prev-sub">—</p>
+          </div>
+        </div>
+        <div id="avg-diff" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px dashed var(--border); font-size: 0.9rem; display:none;">
+        </div>
+      </div>
       <div id="expense-chart-card" class="card" style="display:none; margin-bottom: 1rem;">
         <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">今年と前年の同月比較</div>
         <div class="chart-container" style="height: 300px;">
@@ -319,6 +336,62 @@
       });
     }
     renderExpenseChart();
+
+    // ============ 平均支出額 (今年 / 前年) ============
+    function renderExpenseAverages() {
+      const card = document.getElementById('expense-avg-card');
+      const withExpense = trend.filter(t => t.expense > 0);
+      if (withExpense.length === 0) { card.style.display = 'none'; return; }
+
+      const years = [...new Set(withExpense.map(t => +t.date.slice(0, 4)))].sort((a, b) => a - b);
+      const curYear = years[years.length - 1];
+      const prevYear = curYear - 1;
+
+      // その年の「支出が入力されている月」の平均
+      const avgOf = (yr) => {
+        const ms = withExpense.filter(t => +t.date.slice(0, 4) === yr);
+        if (!ms.length) return null;
+        const sum = ms.reduce((s, t) => s + t.expense, 0);
+        return { avg: Math.round(sum / ms.length), months: ms.length, total: sum };
+      };
+
+      const cur = avgOf(curYear);
+      const prev = avgOf(prevYear);
+
+      card.style.display = 'block';
+      document.getElementById('avg-cur-label').textContent = `${curYear}年`;
+      document.getElementById('avg-prev-label').textContent = `${prevYear}年`;
+
+      if (cur) {
+        document.getElementById('avg-cur').textContent = formatYen(cur.avg);
+        document.getElementById('avg-cur-sub').textContent = `${cur.months}ヶ月の平均 / 年計 ${formatYenShort(cur.total)}`;
+      }
+      if (prev) {
+        document.getElementById('avg-prev').textContent = formatYen(prev.avg);
+        document.getElementById('avg-prev-sub').textContent = `${prev.months}ヶ月の平均 / 年計 ${formatYenShort(prev.total)}`;
+      } else {
+        document.getElementById('avg-prev').textContent = '—';
+        document.getElementById('avg-prev-sub').textContent = 'データなし';
+      }
+
+      // 前年との差
+      const diffEl = document.getElementById('avg-diff');
+      if (cur && prev) {
+        const d = cur.avg - prev.avg;
+        const pct = prev.avg !== 0 ? (d / prev.avg) * 100 : 0;
+        diffEl.style.display = 'block';
+        diffEl.innerHTML = `
+          <div style="display:flex; justify-content: space-between; align-items: baseline;">
+            <span style="color: var(--text-muted);">前年との差 (月平均)</span>
+            <span class="${d > 0 ? 'card-sub down' : 'card-sub up'}" style="font-weight:600;">
+              ${d >= 0 ? '+' : ''}${formatYen(d)} (${formatPercent(pct)})
+            </span>
+          </div>`;
+      } else {
+        diffEl.style.display = 'none';
+      }
+    }
+    renderExpenseAverages();
 
     if (trend.length === 0) {
       // データなし状態

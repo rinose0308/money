@@ -141,27 +141,15 @@
         </div>
       </div>
 
-      <!-- 結果 (読み取り専用) -->
+      <!-- 結果 (読み取り専用・年が横に並ぶキャッシュフロー表) -->
       <h2 class="section-title">年別キャッシュフロー</h2>
-      <div class="card" style="padding: 0;">
+      <div class="card" style="padding: 0.75rem;">
+        <p style="color: var(--text-muted); font-size: 0.82rem; margin: 0 0 0.5rem;">
+          横にスクロールすると先の年が見られます(単位: 万円)。
+        </p>
         <div class="table-wrap">
-          <table class="table stacked-mobile" id="lp-table">
-            <thead>
-              <tr>
-                <th>年</th>
-                <th id="age-header">年齢</th>
-                <th class="num">収入</th>
-                <th class="num">支出</th>
-                <th class="num">年間収支</th>
-                <th class="num loan-col" style="display:none;">ローン返済</th>
-                <th class="num">運用益</th>
-                <th class="num">現預金</th>
-                <th class="num">運用資産</th>
-                <th class="num">年末資産</th>
-                <th class="num loan-col" style="display:none;">ローン残高</th>
-                <th>メモ</th>
-              </tr>
-            </thead>
+          <table class="table matrix-table" id="lp-table">
+            <thead id="lp-thead"></thead>
             <tbody id="lp-tbody"></tbody>
           </table>
         </div>
@@ -284,9 +272,7 @@
       document.getElementById('lp-income-help').style.color = 'var(--warning)';
     }
 
-    if (membersWithBirth.length) {
-      document.getElementById('age-header').textContent = '年齢 (' + membersWithBirth.map(m => m.name).join('/') + ')';
-    }
+    // 年齢の行ラベルは renderMatrix 側で名義名つきで描画する
 
     // ======== 特別な年 (イベント) ========
     const eventsTbody = document.getElementById('events-tbody');
@@ -449,8 +435,7 @@
         }
       }
 
-      tbody.innerHTML = '';
-      const labels = [], endAssetsArr = [], netWorthArr = [], loanBalArr = [];
+      const labels = [], endAssetsArr = [], netWorthArr = [], loanBalArr = [], years = [];
 
       for (let y = startY; y <= endY; y++) {
         const ev = events.get(y) ?? {};
@@ -479,27 +464,10 @@
         const endA = cash + invest;
         const netWorth = endA - loanBal;
 
-        const loanPayCell = hasLoans
-          ? `<td class="num loan-col" data-label="ローン返済">${loanPay > 0 ? '-' + formatYenShort(loanPay) : '—'}</td>` : '';
-        const loanBalCell = hasLoans
-          ? `<td class="num loan-col" data-label="ローン残高">${loanBal > 0 ? formatYen(loanBal) : '完済'}</td>` : '';
-
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td data-label="年" class="title-cell">${y}</td>
-          <td data-label="年齢">${ageCell(y)}</td>
-          <td class="num" data-label="収入">${formatYen(inc)}</td>
-          <td class="num" data-label="支出">${formatYen(exp)}</td>
-          <td class="num" data-label="年間収支"><span class="card-sub ${cf >= 0 ? 'up' : 'down'}">${cf >= 0 ? '+' : ''}${formatYenShort(cf)}</span></td>
-          ${loanPayCell}
-          <td class="num" data-label="運用益"><span class="card-sub ${growth >= 0 ? 'up' : 'down'}">${growth >= 0 ? '+' : ''}${formatYenShort(growth)}</span></td>
-          <td class="num" data-label="現預金" style="${cash < 0 ? 'color:var(--danger);' : ''}">${formatYen(cash)}</td>
-          <td class="num" data-label="運用資産">${formatYen(invest)}</td>
-          <td class="num" data-label="年末資産" style="font-weight:600; ${endA < 0 ? 'color:var(--danger);' : ''}">${formatYen(endA)}</td>
-          ${loanBalCell}
-          <td data-label="メモ">${escapeHtml(ev.note ?? '')}</td>
-        `;
-        tbody.appendChild(tr);
+        years.push({
+          y, age: ageCell(y), inc, exp, loanPay, cf, growth,
+          cash, invest, endA, loanBal, note: ev.note ?? '',
+        });
 
         labels.push(String(y));
         endAssetsArr.push(endA);
@@ -507,7 +475,50 @@
         loanBalArr.push(loanBal);
       }
       refreshLoansVisibility();
+      renderMatrix(years, hasLoans);
       drawChart(labels, endAssetsArr, hasLoans ? netWorthArr : null);
+    }
+
+    // 年を横に並べたキャッシュフロー表を描画
+    function renderMatrix(years, hasLoans) {
+      const thead = document.getElementById('lp-thead');
+      const tb = document.getElementById('lp-tbody');
+      if (!years.length) { thead.innerHTML = ''; tb.innerHTML = ''; return; }
+
+      // 万円単位・符号付きの短縮表示
+      const man = (v) => {
+        if (v === 0) return '0';
+        const m = v / 10000;
+        const s = Math.abs(m) >= 100 ? m.toFixed(0) : m.toFixed(1);
+        return s;
+      };
+      const cls = (v) => v < 0 ? ' class="neg"' : '';
+
+      thead.innerHTML = `<tr><th class="row-head">年</th>${years.map(d => `<th>${d.y}</th>`).join('')}</tr>`;
+
+      const ageLabel = membersWithBirth.length
+        ? `年齢<br><span style="font-weight:400;font-size:0.7rem;">${membersWithBirth.map(m => escapeHtml(m.name)).join('/')}</span>`
+        : '年齢';
+
+      const rows = [];
+      rows.push(`<tr><th class="row-head">${ageLabel}</th>${years.map(d => `<td>${d.age}</td>`).join('')}</tr>`);
+      rows.push(`<tr class="section-gap"><th class="row-head">収入</th>${years.map(d => `<td>${man(d.inc)}</td>`).join('')}</tr>`);
+      rows.push(`<tr><th class="row-head">支出</th>${years.map(d => `<td>${man(d.exp)}</td>`).join('')}</tr>`);
+      if (hasLoans) {
+        rows.push(`<tr><th class="row-head">ローン返済</th>${years.map(d => `<td>${d.loanPay > 0 ? '-' + man(d.loanPay) : '—'}</td>`).join('')}</tr>`);
+      }
+      rows.push(`<tr><th class="row-head">年間収支</th>${years.map(d => `<td${cls(d.cf)}>${d.cf >= 0 ? '+' : ''}${man(d.cf)}</td>`).join('')}</tr>`);
+      rows.push(`<tr><th class="row-head">運用益</th>${years.map(d => `<td>+${man(d.growth)}</td>`).join('')}</tr>`);
+      rows.push(`<tr class="section-gap"><th class="row-head">現預金</th>${years.map(d => `<td${cls(d.cash)}>${man(d.cash)}</td>`).join('')}</tr>`);
+      rows.push(`<tr><th class="row-head">運用資産</th>${years.map(d => `<td>${man(d.invest)}</td>`).join('')}</tr>`);
+      rows.push(`<tr class="emphasis"><th class="row-head">年末資産</th>${years.map(d => `<td${cls(d.endA)}>${man(d.endA)}</td>`).join('')}</tr>`);
+      if (hasLoans) {
+        rows.push(`<tr><th class="row-head">ローン残高</th>${years.map(d => `<td>${d.loanBal > 0 ? man(d.loanBal) : '完済'}</td>`).join('')}</tr>`);
+      }
+      if (years.some(d => d.note)) {
+        rows.push(`<tr class="memo-row section-gap"><th class="row-head">メモ</th>${years.map(d => `<td>${escapeHtml(d.note)}</td>`).join('')}</tr>`);
+      }
+      tb.innerHTML = rows.join('');
     }
 
     function drawChart(labels, endAssetsArr, netWorthArr) {

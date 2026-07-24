@@ -527,6 +527,52 @@ input[type="number"] {
   }
 }
 
+/* ============================================================
+   マトリクス表 (年が横に並ぶキャッシュフロー表)
+   1列目(項目名)を固定して横スクロールできる
+   ============================================================ */
+.matrix-table { border-collapse: separate; border-spacing: 0; white-space: nowrap; }
+.matrix-table th, .matrix-table td {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+/* 1列目: 項目名を固定 */
+.matrix-table .row-head {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--bg-card);
+  border-right: 2px solid var(--border);
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  min-width: 96px;
+}
+/* ヘッダ行(年)を上に固定 */
+.matrix-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg);
+  text-align: right;
+  font-size: 0.8rem;
+  border-bottom: 2px solid var(--border);
+}
+.matrix-table thead th.row-head { z-index: 4; background: var(--bg); }
+.matrix-table td { text-align: right; }
+/* 節目の行を強調 */
+.matrix-table tr.emphasis td, .matrix-table tr.emphasis .row-head { font-weight: 700; }
+.matrix-table tr.section-gap td, .matrix-table tr.section-gap .row-head {
+  border-top: 2px solid var(--border);
+}
+.matrix-table td.neg { color: var(--danger); }
+.matrix-table td.pos { color: var(--success); }
+/* メモ行は左寄せ・折り返さない */
+.matrix-table tr.memo-row td { text-align: left; font-size: 0.75rem; color: var(--text-muted); }
+
 /* 未保存インジケーター */
 .btn-dirty {
   position: relative;
