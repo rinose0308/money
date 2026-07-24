@@ -39,14 +39,19 @@
             <input type="number" id="lp-end" class="form-input" min="2000" max="2100">
           </div>
           <div class="form-group" style="margin:0;">
-            <label class="form-label" for="lp-start-assets">開始資産 (円)</label>
-            <input type="number" id="lp-start-assets" class="form-input" inputmode="numeric">
-            <p class="form-help" id="lp-start-assets-help"></p>
+            <label class="form-label" for="lp-start-cash">開始資産 — 現預金 (円)</label>
+            <input type="number" id="lp-start-cash" class="form-input" inputmode="numeric">
+            <p class="form-help" id="lp-start-cash-help"></p>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-start-inv">開始資産 — 運用資産 (円)</label>
+            <input type="number" id="lp-start-inv" class="form-input" inputmode="numeric">
+            <p class="form-help" id="lp-start-inv-help"></p>
           </div>
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-rate">想定利回り (%)</label>
             <input type="number" id="lp-rate" class="form-input" step="0.1" inputmode="decimal" placeholder="例: 3">
-            <p class="form-help">資産全体が毎年何%増える想定か</p>
+            <p class="form-help">運用資産が毎年何%増える想定か(現預金には掛かりません)</p>
           </div>
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-base-income">年間収入 (円/年)</label>
@@ -58,6 +63,12 @@
             <input type="number" id="lp-base-expense" class="form-input" inputmode="numeric">
             <p class="form-help">毎年の支出の目安</p>
           </div>
+        </div>
+        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px dashed var(--border); display:flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+          <span style="font-size: 0.82rem; color: var(--text-muted);">
+            開始資産は<strong>月次入力の最新実績から自動反映</strong>されます(月次入力を保存すると次に開いたとき最新になります)。
+          </span>
+          <button type="button" class="btn btn-ghost btn-sm" id="reset-assets-btn">実績から取り直す</button>
         </div>
       </div>
 
@@ -144,6 +155,8 @@
                 <th class="num">年間収支</th>
                 <th class="num loan-col" style="display:none;">ローン返済</th>
                 <th class="num">運用益</th>
+                <th class="num">現預金</th>
+                <th class="num">運用資産</th>
                 <th class="num">年末資産</th>
                 <th class="num loan-col" style="display:none;">ローン残高</th>
                 <th>メモ</th>
@@ -208,6 +221,20 @@
     const latestNet = trend.length ? trend[trend.length - 1].net : 0;
     const membersWithBirth = members.filter(m => m.birth_year);
 
+    // ---- 最新の月次実績から「現預金 / 運用資産」を算出 ----
+    // 現預金 = 預貯金(bank) − 支払予定 (クレカ引落は現預金から出るため)
+    // 運用資産 = 預貯金以外すべて (株・投信・外国株・保険・共済など)
+    // 合計は従来の純資産(net)と一致する
+    function actualSplit() {
+      if (!trend.length) return { cash: 0, investment: 0, date: null };
+      const last = trend[trend.length - 1];
+      const bank = last.byType?.bank ?? 0;
+      const investment = Math.round((last.total ?? 0) - bank);
+      const cash = Math.round(bank - (last.expense ?? 0));
+      return { cash, investment, date: last.date };
+    }
+    const ACTUAL = actualSplit();
+
     // ---- 初期値 ----
     const nowYear = new Date().getFullYear();
     let annualIncomeSeed = 0;
@@ -234,14 +261,21 @@
       base_income: annualIncomeSeed,
       base_expense: annualExpenseSeed,
       return_rate: 3,
-      start_assets: Math.round(latestNet),
     };
+
+    // 開始資産は毎回「最新の月次実績」から入れ直す (=月次入力の保存が自動反映される)
+    function fillAssetsFromActual() {
+      document.getElementById('lp-start-cash').value = ACTUAL.cash;
+      document.getElementById('lp-start-inv').value = ACTUAL.investment;
+      const asOf = ACTUAL.date ? `${ACTUAL.date.slice(0, 7)}時点の実績` : '実績なし';
+      document.getElementById('lp-start-cash-help').textContent = `${asOf}: ${formatYen(ACTUAL.cash)}`;
+      document.getElementById('lp-start-inv-help').textContent = `${asOf}: ${formatYen(ACTUAL.investment)}`;
+    }
 
     // 前提フォーム
     document.getElementById('lp-start').value = S.start_year;
     document.getElementById('lp-end').value = S.end_year;
-    document.getElementById('lp-start-assets').value = S.start_assets ?? Math.round(latestNet);
-    document.getElementById('lp-start-assets-help').textContent = `現在の純資産: ${formatYen(Math.round(latestNet))}`;
+    fillAssetsFromActual();
     document.getElementById('lp-rate').value = S.return_rate ?? 0;
     document.getElementById('lp-base-income').value = S.base_income ?? 0;
     document.getElementById('lp-base-expense').value = S.base_expense ?? 0;
@@ -393,7 +427,9 @@
       const rate = (parseFloat(document.getElementById('lp-rate').value) || 0) / 100;
       const baseInc = toInt(document.getElementById('lp-base-income').value) ?? 0;
       const baseExp = toInt(document.getElementById('lp-base-expense').value) ?? 0;
-      let assets = toInt(document.getElementById('lp-start-assets').value) ?? 0;
+      // 現預金と運用資産を分けて追跡 (利回りは運用資産にのみ適用)
+      let cash = toInt(document.getElementById('lp-start-cash').value) ?? 0;
+      let invest = toInt(document.getElementById('lp-start-inv').value) ?? 0;
 
       if (endY < startY || endY - startY > 100) { tbody.innerHTML = ''; return; }
 
@@ -436,8 +472,11 @@
         }
 
         const cf = inc - exp - loanPay;
-        const growth = Math.round(assets * rate);
-        const endA = assets + cf + growth;
+        // 利回りは運用資産にのみ適用。年間収支は現預金に増減する。
+        const growth = Math.round(invest * rate);
+        invest = invest + growth;
+        cash = cash + cf;
+        const endA = cash + invest;
         const netWorth = endA - loanBal;
 
         const loanPayCell = hasLoans
@@ -454,6 +493,8 @@
           <td class="num" data-label="年間収支"><span class="card-sub ${cf >= 0 ? 'up' : 'down'}">${cf >= 0 ? '+' : ''}${formatYenShort(cf)}</span></td>
           ${loanPayCell}
           <td class="num" data-label="運用益"><span class="card-sub ${growth >= 0 ? 'up' : 'down'}">${growth >= 0 ? '+' : ''}${formatYenShort(growth)}</span></td>
+          <td class="num" data-label="現預金" style="${cash < 0 ? 'color:var(--danger);' : ''}">${formatYen(cash)}</td>
+          <td class="num" data-label="運用資産">${formatYen(invest)}</td>
           <td class="num" data-label="年末資産" style="font-weight:600; ${endA < 0 ? 'color:var(--danger);' : ''}">${formatYen(endA)}</td>
           ${loanBalCell}
           <td data-label="メモ">${escapeHtml(ev.note ?? '')}</td>
@@ -464,7 +505,6 @@
         endAssetsArr.push(endA);
         netWorthArr.push(netWorth);
         loanBalArr.push(loanBal);
-        assets = endA;
       }
       refreshLoansVisibility();
       drawChart(labels, endAssetsArr, hasLoans ? netWorthArr : null);
@@ -512,8 +552,15 @@
     }
 
     // 前提の変更で即再計算
-    ['lp-start','lp-end','lp-rate','lp-start-assets','lp-base-income','lp-base-expense']
+    ['lp-start','lp-end','lp-rate','lp-start-cash','lp-start-inv','lp-base-income','lp-base-expense']
       .forEach(id => document.getElementById(id).addEventListener('input', recompute));
+
+    // 実績から取り直す
+    document.getElementById('reset-assets-btn').addEventListener('click', () => {
+      fillAssetsFromActual();
+      recompute();
+      toast('最新の実績を反映しました', 'success');
+    });
 
     // ======== 保存 ========
     document.getElementById('save-btn').addEventListener('click', withErrorToast(async () => {
@@ -531,7 +578,8 @@
           base_income: toInt(document.getElementById('lp-base-income').value) ?? 0,
           base_expense: toInt(document.getElementById('lp-base-expense').value) ?? 0,
           return_rate: parseFloat(document.getElementById('lp-rate').value) || 0,
-          start_assets: toInt(document.getElementById('lp-start-assets').value),
+          // 開始資産は毎回実績から取り直すため保存しない (null)
+          start_assets: null,
         });
         const events = collectEvents();
         const rows = [];
