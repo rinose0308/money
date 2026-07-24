@@ -533,18 +533,23 @@ input[type="number"] {
    ============================================================ */
 .matrix-table { border-collapse: separate; border-spacing: 0; white-space: nowrap; }
 .matrix-table th, .matrix-table td {
-  padding: 0.4rem 0.6rem;
+  padding: 0.4rem 0.7rem;
   font-size: 0.85rem;
+  /* 縦横の罫線(格子) */
   border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   font-variant-numeric: tabular-nums;
 }
+/* 外枠(左端と上端) */
+.matrix-table thead th { border-top: 1px solid var(--border); }
+.matrix-table tr th.row-head, .matrix-table tr td:first-child { border-left: 1px solid var(--border); }
 /* 1列目: 項目名を固定 */
 .matrix-table .row-head {
   position: sticky;
   left: 0;
   z-index: 2;
   background: var(--bg-card);
-  border-right: 2px solid var(--border);
+  border-right: 2px solid var(--text-muted);  /* 項目列との区切りを太めに */
   text-align: left;
   font-weight: 600;
   color: var(--text-muted);
@@ -559,14 +564,19 @@ input[type="number"] {
   background: var(--bg);
   text-align: right;
   font-size: 0.8rem;
-  border-bottom: 2px solid var(--border);
+  border-bottom: 2px solid var(--text-muted);  /* 見出し行の下を太め */
 }
 .matrix-table thead th.row-head { z-index: 4; background: var(--bg); }
 .matrix-table td { text-align: right; }
-/* 節目の行を強調 */
+/* 縞模様で行を追いやすく */
+.matrix-table tbody tr:nth-child(even) td { background: #fafbfc; }
+.matrix-table tbody tr:nth-child(even) .row-head { background: #f4f6f8; }
+/* 節目の行を強調 (ゼブラより詳細度を上げて確実に勝たせる) */
 .matrix-table tr.emphasis td, .matrix-table tr.emphasis .row-head { font-weight: 700; }
+.matrix-table tbody tr.emphasis td { background: #eff6ff; }
+.matrix-table tbody tr.emphasis .row-head { background: #e6effe; }
 .matrix-table tr.section-gap td, .matrix-table tr.section-gap .row-head {
-  border-top: 2px solid var(--border);
+  border-top: 2px solid var(--text-muted);
 }
 .matrix-table td.neg { color: var(--danger); }
 .matrix-table td.pos { color: var(--success); }
