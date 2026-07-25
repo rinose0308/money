@@ -644,10 +644,13 @@ export async function importLegacyExpenses(records) {
 // ============================================================
 
 // 各 snapshot_date における総資産を集計して返す
-// 戻り値: [{ date, total, expense, net, byAccount, byType }]
-//   total   = 資産の合計
-//   expense = その月末の支払予定額(monthly_manual)
-//   net     = total - expense (クレカ引き落とし後の実質資産)
+// 戻り値: [{ date, total, expense, net, pnl, investTotal, principal, byAccount, byType }]
+//   total       = 資産の合計
+//   expense     = その月末の支払予定額(monthly_manual)
+//   net         = total - expense (クレカ引き落とし後の実質資産)
+//   pnl         = 含み益の合計 (入力があるものだけ)
+//   investTotal = 含み益を入力した口座の評価額合計
+//   principal   = investTotal - pnl (投資元本)
 export async function getAssetTrend({ fromDate = null } = {}) {
   const accounts = await listAccounts({ includeInactive: true });
   const accountById = new Map(accounts.map(a => [a.id, a]));
@@ -656,7 +659,10 @@ export async function getAssetTrend({ fromDate = null } = {}) {
   const byDate = new Map();
 
   for (const s of snapshots) {
-    if (!byDate.has(s.snapshot_date)) byDate.set(s.snapshot_date, { date: s.snapshot_date, total: 0, expense: 0, net: 0, byAccount: {}, byType: {} });
+    if (!byDate.has(s.snapshot_date)) byDate.set(s.snapshot_date, {
+      date: s.snapshot_date, total: 0, expense: 0, net: 0,
+      pnl: 0, investTotal: 0, principal: 0, byAccount: {}, byType: {},
+    });
     const entry = byDate.get(s.snapshot_date);
     const balance = Number(s.balance);
     entry.total += balance;
@@ -664,6 +670,12 @@ export async function getAssetTrend({ fromDate = null } = {}) {
 
     const type = accountById.get(s.account_id)?.account_type ?? 'other';
     entry.byType[type] = (entry.byType[type] ?? 0) + balance;
+
+    // 含み益 (入力がある行のみ。元本 = 評価額 - 含み益)
+    if (s.unrealized_pnl != null) {
+      entry.pnl += Number(s.unrealized_pnl);
+      entry.investTotal += balance;
+    }
   }
 
   // 月次入力の支出 (= 支払予定) を月末日ごとに集計
@@ -682,6 +694,7 @@ export async function getAssetTrend({ fromDate = null } = {}) {
   for (const entry of byDate.values()) {
     entry.expense = expenseByDate.get(entry.date) ?? 0;
     entry.net = entry.total - entry.expense;
+    entry.principal = entry.investTotal - entry.pnl;
   }
 
   return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));

@@ -115,6 +115,36 @@
         </div>
       </div>
 
+      <!-- 投資の元本と含み益 -->
+      <div id="pnl-section" style="display:none;">
+        <h2 class="section-title">投資の元本と含み益</h2>
+        <div class="card" style="margin-bottom: 1rem;">
+          <div class="grid cols-4" style="margin-bottom: 1rem;">
+            <div>
+              <p class="card-title">評価額</p>
+              <p class="card-value" id="pnl-value" style="font-size: 1.4rem;">—</p>
+            </div>
+            <div>
+              <p class="card-title">元本</p>
+              <p class="card-value" id="pnl-principal" style="font-size: 1.4rem;">—</p>
+            </div>
+            <div>
+              <p class="card-title">含み益</p>
+              <p class="card-value" id="pnl-gain" style="font-size: 1.4rem;">—</p>
+              <p class="card-sub" id="pnl-gain-sub">—</p>
+            </div>
+            <div>
+              <p class="card-title">前月比 (含み益)</p>
+              <p class="card-value" id="pnl-diff" style="font-size: 1.4rem;">—</p>
+              <p class="card-sub" id="pnl-diff-sub">—</p>
+            </div>
+          </div>
+          <div class="chart-container" style="height: 300px;">
+            <canvas id="pnl-chart"></canvas>
+          </div>
+        </div>
+      </div>
+
       <!-- 支出推移 -->
       <h2 class="section-title">支出推移</h2>
       <div id="expense-avg-card" class="card" style="display:none; margin-bottom: 1rem;">
@@ -392,6 +422,85 @@
       }
     }
     renderExpenseAverages();
+
+    // ============ 投資の元本と含み益 ============
+    function renderPnl() {
+      const section = document.getElementById('pnl-section');
+      // 含み益の入力がある月だけ対象
+      const withPnl = trend.filter(t => t.investTotal > 0);
+      if (withPnl.length === 0) { section.style.display = 'none'; return; }
+      section.style.display = 'block';
+
+      const latest = withPnl[withPnl.length - 1];
+      const prev = withPnl.length >= 2 ? withPnl[withPnl.length - 2] : null;
+
+      document.getElementById('pnl-value').textContent = formatYen(latest.investTotal);
+      document.getElementById('pnl-principal').textContent = formatYen(latest.principal);
+
+      const gainEl = document.getElementById('pnl-gain');
+      gainEl.textContent = formatYen(latest.pnl);
+      gainEl.style.color = latest.pnl >= 0 ? 'var(--success)' : 'var(--danger)';
+      const ratio = latest.principal > 0 ? (latest.pnl / latest.principal) * 100 : 0;
+      document.getElementById('pnl-gain-sub').textContent = `元本比 ${formatPercent(ratio)}`;
+
+      const diffEl = document.getElementById('pnl-diff');
+      const diffSub = document.getElementById('pnl-diff-sub');
+      if (prev) {
+        const d = latest.pnl - prev.pnl;
+        diffEl.textContent = `${d >= 0 ? '+' : ''}${formatYenShort(d)}`;
+        diffEl.style.color = d >= 0 ? 'var(--success)' : 'var(--danger)';
+        diffSub.textContent = `${prev.date.slice(0, 7)} → ${latest.date.slice(0, 7)}`;
+      } else {
+        diffEl.textContent = '—';
+        diffSub.textContent = '前月データなし';
+      }
+
+      // 直近36ヶ月を積み上げ(元本 + 含み益 = 評価額)
+      const series = withPnl.slice(-36);
+      const ctx = document.getElementById('pnl-chart').getContext('2d');
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: series.map(t => t.date.slice(0, 7)),
+          datasets: [
+            {
+              label: '元本', data: series.map(t => t.principal),
+              borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.75)',
+              fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
+              datalabels: { display: false },
+            },
+            {
+              label: '含み益', data: series.map(t => t.pnl),
+              borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,0.55)',
+              fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
+              datalabels: { display: false },
+            },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
+            tooltip: {
+              callbacks: {
+                label: (c) => `${c.dataset.label}: ${formatYen(c.parsed.y)}`,
+                footer: (items) => {
+                  const i = items[0]?.dataIndex;
+                  if (i == null) return '';
+                  return `評価額: ${formatYen(series[i].investTotal)}`;
+                },
+              },
+            },
+          },
+          scales: {
+            y: { stacked: true, ticks: { callback: (v) => formatYenShort(v) } },
+            x: { stacked: true },
+          },
+        },
+      });
+    }
+    renderPnl();
 
     if (trend.length === 0) {
       // データなし状態

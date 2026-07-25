@@ -219,7 +219,9 @@
       const bank = last.byType?.bank ?? 0;
       const investment = Math.round((last.total ?? 0) - bank);
       const cash = Math.round(bank - (last.expense ?? 0));
-      return { cash, investment, date: last.date };
+      // 運用資産のうち含み益 (入力がある分だけ)。元本 = 運用資産 - 含み益
+      const pnl = Math.round(last.pnl ?? 0);
+      return { cash, investment, pnl, principal: investment - pnl, date: last.date };
     }
     const ACTUAL = actualSplit();
 
@@ -257,7 +259,9 @@
       document.getElementById('lp-start-inv').value = ACTUAL.investment;
       const asOf = ACTUAL.date ? `${ACTUAL.date.slice(0, 7)}時点の実績` : '実績なし';
       document.getElementById('lp-start-cash-help').textContent = `${asOf}: ${formatYen(ACTUAL.cash)}`;
-      document.getElementById('lp-start-inv-help').textContent = `${asOf}: ${formatYen(ACTUAL.investment)}`;
+      document.getElementById('lp-start-inv-help').textContent = (ACTUAL.pnl ?? 0) !== 0
+        ? `${asOf}: ${formatYen(ACTUAL.investment)} (元本 ${formatYenShort(ACTUAL.principal)} + 含み益 ${formatYenShort(ACTUAL.pnl)})`
+        : `${asOf}: ${formatYen(ACTUAL.investment)}`;
     }
 
     // 前提フォーム
@@ -416,6 +420,9 @@
       // 現預金と運用資産を分けて追跡 (利回りは運用資産にのみ適用)
       let cash = toInt(document.getElementById('lp-start-cash').value) ?? 0;
       let invest = toInt(document.getElementById('lp-start-inv').value) ?? 0;
+      // 運用資産のうち含み益。以後の運用益はすべて含み益として積み上がる(元本は据え置き)
+      let investPnl = Math.max(0, Math.min(ACTUAL.pnl ?? 0, invest));
+      const hasPnlData = (ACTUAL.pnl ?? 0) !== 0;
 
       if (endY < startY || endY - startY > 100) { tbody.innerHTML = ''; return; }
 
@@ -460,13 +467,15 @@
         // 利回りは運用資産にのみ適用。年間収支は現預金に増減する。
         const growth = Math.round(invest * rate);
         invest = invest + growth;
+        investPnl = investPnl + growth;   // 運用益は含み益として積み上がる
         cash = cash + cf;
         const endA = cash + invest;
         const netWorth = endA - loanBal;
 
         years.push({
           y, age: ageCell(y), inc, exp, loanPay, cf, growth,
-          cash, invest, endA, loanBal, note: ev.note ?? '',
+          cash, invest, investPnl, investPrincipal: invest - investPnl,
+          endA, loanBal, note: ev.note ?? '',
         });
 
         labels.push(String(y));
@@ -475,12 +484,12 @@
         loanBalArr.push(loanBal);
       }
       refreshLoansVisibility();
-      renderMatrix(years, hasLoans);
+      renderMatrix(years, hasLoans, hasPnlData);
       drawChart(labels, endAssetsArr, hasLoans ? netWorthArr : null);
     }
 
     // 年を横に並べたキャッシュフロー表を描画
-    function renderMatrix(years, hasLoans) {
+    function renderMatrix(years, hasLoans, hasPnlData) {
       const thead = document.getElementById('lp-thead');
       const tb = document.getElementById('lp-tbody');
       if (!years.length) { thead.innerHTML = ''; tb.innerHTML = ''; return; }
@@ -511,6 +520,10 @@
       rows.push(`<tr><th class="row-head">運用益</th>${years.map(d => `<td>+${man(d.growth)}</td>`).join('')}</tr>`);
       rows.push(`<tr class="section-gap"><th class="row-head">現預金</th>${years.map(d => `<td${cls(d.cash)}>${man(d.cash)}</td>`).join('')}</tr>`);
       rows.push(`<tr><th class="row-head">運用資産</th>${years.map(d => `<td>${man(d.invest)}</td>`).join('')}</tr>`);
+      if (hasPnlData) {
+        rows.push(`<tr><th class="row-head" style="padding-left:1.2rem;">└ 元本</th>${years.map(d => `<td>${man(d.investPrincipal)}</td>`).join('')}</tr>`);
+        rows.push(`<tr><th class="row-head" style="padding-left:1.2rem;">└ 含み益</th>${years.map(d => `<td class="pos">${man(d.investPnl)}</td>`).join('')}</tr>`);
+      }
       rows.push(`<tr class="emphasis"><th class="row-head">年末資産</th>${years.map(d => `<td${cls(d.endA)}>${man(d.endA)}</td>`).join('')}</tr>`);
       if (hasLoans) {
         rows.push(`<tr><th class="row-head">ローン残高</th>${years.map(d => `<td>${d.loanBal > 0 ? man(d.loanBal) : '完済'}</td>`).join('')}</tr>`);

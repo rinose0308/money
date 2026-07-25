@@ -130,6 +130,9 @@
       mutual_fund: '投資信託', insurance: '保険', pension: '年金/共済', other: 'その他',
     };
     const DEFAULT_INCOME_CATEGORIES = ['給与', 'ボーナス', '副収入', 'その他'];
+    // 含み益を入力できる口座種別 (預貯金などには不要)
+    const PNL_TYPES = new Set(['jp_stock', 'foreign_stock', 'mutual_fund']);
+    const hasPnl = (acc) => PNL_TYPES.has(acc.account_type);
 
     function escapeHtml(s) {
       return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
@@ -316,26 +319,42 @@
           if (acc.is_foreign_currency) {
             const fa = ex?.foreign_amount != null ? Number(ex.foreign_amount) : '';
             const calcInit = (fa !== '' && sharedRate !== '') ? Math.round(fa * sharedRate) : null;
+            const fxPnl = ex?.unrealized_pnl != null ? Math.round(Number(ex.unrealized_pnl)) : '';
+            // 外貨でも投資性なら含み益(円換算後)を入力できる
+            const fxPnlInput = hasPnl(acc) ? `
+                  <input type="number" inputmode="numeric"
+                    class="form-input fx-input pnl-input"
+                    data-account-id="${acc.id}" data-member-id="${c.id ?? ''}"
+                    style="margin-top:2px; font-size:0.8rem; padding:0.25rem 0.5rem;"
+                    value="${fxPnl}" placeholder="含み益(円)" title="含み益(円換算)">` : '';
             return `
               <td class="num" data-label="${escapeHtml(c.name)}">
                 <div class="fx-cell">
                   <input type="number" step="0.0001" inputmode="decimal"
                     class="form-input fx-input fx-amount"
                     data-account-id="${acc.id}" data-member-id="${c.id ?? ''}"
-                    value="${fa}" placeholder="0">
-                  <span class="fx-result" data-result-for="${acc.id}|${c.id ?? 'shared'}">${calcInit != null ? '= ' + formatYen(calcInit) : ''}</span>
+                    value="${fa}" placeholder="外貨額">
+                  <span class="fx-result" data-result-for="${acc.id}|${c.id ?? 'shared'}">${calcInit != null ? '= ' + formatYen(calcInit) : ''}</span>${fxPnlInput}
                 </div>
               </td>
             `;
           } else {
             const v = ex ? Math.round(Number(ex.balance)) : '';
+            const pnl = ex?.unrealized_pnl != null ? Math.round(Number(ex.unrealized_pnl)) : '';
+            // 投資性の口座は「評価額 + 含み益」の2段入力
+            const pnlInput = hasPnl(acc) ? `
+                <input type="number" inputmode="numeric"
+                  class="form-input pnl-input"
+                  data-account-id="${acc.id}" data-member-id="${c.id ?? ''}"
+                  style="text-align:right; max-width: 160px; margin-top:2px; font-size:0.8rem; padding:0.25rem 0.5rem;"
+                  value="${pnl}" placeholder="含み益" title="含み益(評価額のうち増えた分)">` : '';
             return `
               <td class="num" data-label="${escapeHtml(c.name)}">
                 <input type="number" inputmode="numeric"
                   class="form-input asset-input"
                   data-account-id="${acc.id}" data-member-id="${c.id ?? ''}"
                   style="text-align:right; max-width: 160px;"
-                  value="${v}" placeholder="0">
+                  value="${v}" placeholder="評価額">${pnlInput}
               </td>
             `;
           }
@@ -440,6 +459,12 @@
           }
         });
       }
+      // 含み益も前月から引き継ぐ
+      tr.querySelectorAll('.pnl-input').forEach(inp => {
+        const memberId = inp.dataset.memberId || null;
+        const prev = prevSnapMap.get(`${accountId}|${memberId ?? 'shared'}`);
+        if (prev?.unrealized_pnl != null) inp.value = Math.round(Number(prev.unrealized_pnl));
+      });
       if (copied === 0) toast('前月のデータがありません', 'warn');
       else markDirty();
     }
@@ -592,6 +617,16 @@
           const rows = [];
           let anyEntered = false;
 
+          // その行の含み益入力を (memberId -> 値) で拾う
+          const pnlByMember = new Map();
+          tr.querySelectorAll('.pnl-input').forEach(inp => {
+            const v = inp.value.trim();
+            if (!v) return;
+            const n = parseInt(v, 10);
+            if (isNaN(n)) return;
+            pnlByMember.set(inp.dataset.memberId || '', n);
+          });
+
           if (isForeign) {
             const rateInp = tr.querySelector('.fx-rate');
             const rate = rateInp ? parseFloat(rateInp.value) : NaN;
@@ -604,7 +639,10 @@
               anyEntered = true;
               const memberId = inp.dataset.memberId || null;
               const balance = Math.round(fa * rate);
-              rows.push({ member_id: memberId, balance, foreign_amount: fa, exchange_rate: rate });
+              rows.push({
+                member_id: memberId, balance, foreign_amount: fa, exchange_rate: rate,
+                unrealized_pnl: pnlByMember.has(inp.dataset.memberId || '') ? pnlByMember.get(inp.dataset.memberId || '') : null,
+              });
             });
           } else {
             tr.querySelectorAll('.asset-input').forEach(inp => {
@@ -614,7 +652,10 @@
               if (isNaN(balance)) return;
               anyEntered = true;
               const memberId = inp.dataset.memberId || null;
-              rows.push({ member_id: memberId, balance });
+              rows.push({
+                member_id: memberId, balance,
+                unrealized_pnl: pnlByMember.has(inp.dataset.memberId || '') ? pnlByMember.get(inp.dataset.memberId || '') : null,
+              });
             });
           }
           if (anyEntered) {
