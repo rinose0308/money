@@ -63,6 +63,16 @@
             <input type="number" id="lp-base-expense" class="form-input" inputmode="numeric">
             <p class="form-help">毎年の支出の目安</p>
           </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-contrib">毎月の積立額 (円/月)</label>
+            <input type="number" id="lp-contrib" class="form-input" inputmode="numeric" placeholder="例: 100000">
+            <p class="form-help" id="lp-contrib-help">現預金から運用資産へ毎月移す額</p>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-contrib-end">積立の終了年</label>
+            <input type="number" id="lp-contrib-end" class="form-input" min="2000" max="2100" placeholder="空欄=ずっと継続">
+            <p class="form-help">この年まで積立を続ける(空欄なら期間終了まで)</p>
+          </div>
         </div>
         <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px dashed var(--border); display:flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
           <span style="font-size: 0.82rem; color: var(--text-muted);">
@@ -195,7 +205,7 @@
         ? `<div class="empty-state" style="max-width:520px;margin:0 auto;">
              <h3>データベースの準備が必要です</h3>
              <p style="margin:0.5rem 0;">ライフプラン用のテーブルがまだ作成されていません。<br>
-             Supabase の SQL Editor で <code>0006_life_plan.sql</code> と <code>0007_life_plan_loans.sql</code> を実行してください。</p>
+             Supabase の SQL Editor で <code>0006_life_plan.sql</code> / <code>0007_life_plan_loans.sql</code> / <code>0008_life_plan_contribution.sql</code> を実行してください。</p>
              <button class="btn btn-primary btn-sm" onclick="location.reload()">実行したら再読み込み</button>
            </div>`
         : `<div class="empty-state" style="max-width:520px;margin:0 auto;">
@@ -251,6 +261,8 @@
       base_income: annualIncomeSeed,
       base_expense: annualExpenseSeed,
       return_rate: 3,
+      monthly_contribution: 0,
+      contribution_end_year: null,
     };
 
     // 開始資産は毎回「最新の月次実績」から入れ直す (=月次入力の保存が自動反映される)
@@ -271,6 +283,8 @@
     document.getElementById('lp-rate').value = S.return_rate ?? 0;
     document.getElementById('lp-base-income').value = S.base_income ?? 0;
     document.getElementById('lp-base-expense').value = S.base_expense ?? 0;
+    document.getElementById('lp-contrib').value = S.monthly_contribution ?? 0;
+    document.getElementById('lp-contrib-end').value = S.contribution_end_year ?? '';
     if (incomeIsPlaceholder) {
       document.getElementById('lp-income-help').textContent = '⚠️ 収入の実績がないため、仮に支出と同額を入れています。実際の年収を入力してください。';
       document.getElementById('lp-income-help').style.color = 'var(--warning)';
@@ -420,9 +434,12 @@
       // 現預金と運用資産を分けて追跡 (利回りは運用資産にのみ適用)
       let cash = toInt(document.getElementById('lp-start-cash').value) ?? 0;
       let invest = toInt(document.getElementById('lp-start-inv').value) ?? 0;
-      // 運用資産のうち含み益。以後の運用益はすべて含み益として積み上がる(元本は据え置き)
+      // 運用資産のうち含み益。以後の運用益は含み益、積立額は元本として積み上がる
       let investPnl = Math.max(0, Math.min(ACTUAL.pnl ?? 0, invest));
-      const hasPnlData = (ACTUAL.pnl ?? 0) !== 0;
+      // 積立設定
+      const monthlyContrib = toInt(document.getElementById('lp-contrib').value) ?? 0;
+      const contribEndYear = toInt(document.getElementById('lp-contrib-end').value);
+      const hasPnlData = (ACTUAL.pnl ?? 0) !== 0 || monthlyContrib > 0;
 
       if (endY < startY || endY - startY > 100) { tbody.innerHTML = ''; return; }
 
@@ -464,16 +481,32 @@
         }
 
         const cf = inc - exp - loanPay;
-        // 利回りは運用資産にのみ適用。年間収支は現預金に増減する。
-        const growth = Math.round(invest * rate);
-        invest = invest + growth;
-        investPnl = investPnl + growth;   // 運用益は含み益として積み上がる
-        cash = cash + cf;
+
+        // 積立: この年に積み立てるか (終了年の指定があればその年まで)
+        const contributing = monthlyContrib > 0 && (contribEndYear == null || y <= contribEndYear);
+        const monthlyAdd = contributing ? monthlyContrib : 0;
+
+        // 運用資産は月次複利で計算 (毎月 利回り/12 で増やし、積立額を足す)
+        const investStart = invest;
+        let contributedThisYear = 0;
+        for (let mo = 0; mo < 12; mo++) {
+          invest += invest * (rate / 12);
+          invest += monthlyAdd;
+          contributedThisYear += monthlyAdd;
+        }
+        invest = Math.round(invest);
+        // 増えた分のうち積立を除いたものが運用益(=含み益)
+        const growth = invest - investStart - contributedThisYear;
+        investPnl = investPnl + growth;
+
+        // 年間収支から積立分を現預金→運用資産へ移す
+        cash = cash + cf - contributedThisYear;
         const endA = cash + invest;
         const netWorth = endA - loanBal;
 
         years.push({
           y, age: ageCell(y), inc, exp, loanPay, cf, growth,
+          contribution: contributedThisYear,
           cash, invest, investPnl, investPrincipal: invest - investPnl,
           endA, loanBal, note: ev.note ?? '',
         });
@@ -517,6 +550,9 @@
         rows.push(`<tr><th class="row-head">ローン返済</th>${years.map(d => `<td>${d.loanPay > 0 ? '-' + man(d.loanPay) : '—'}</td>`).join('')}</tr>`);
       }
       rows.push(`<tr><th class="row-head">年間収支</th>${years.map(d => `<td${cls(d.cf)}>${d.cf >= 0 ? '+' : ''}${man(d.cf)}</td>`).join('')}</tr>`);
+      if (years.some(d => d.contribution > 0)) {
+        rows.push(`<tr><th class="row-head">積立</th>${years.map(d => `<td>${d.contribution > 0 ? '-' + man(d.contribution) : '—'}</td>`).join('')}</tr>`);
+      }
       rows.push(`<tr><th class="row-head">運用益</th>${years.map(d => `<td>+${man(d.growth)}</td>`).join('')}</tr>`);
       rows.push(`<tr class="section-gap"><th class="row-head">現預金</th>${years.map(d => `<td${cls(d.cash)}>${man(d.cash)}</td>`).join('')}</tr>`);
       rows.push(`<tr><th class="row-head">運用資産</th>${years.map(d => `<td>${man(d.invest)}</td>`).join('')}</tr>`);
@@ -576,8 +612,20 @@
     }
 
     // 前提の変更で即再計算
-    ['lp-start','lp-end','lp-rate','lp-start-cash','lp-start-inv','lp-base-income','lp-base-expense']
+    ['lp-start','lp-end','lp-rate','lp-start-cash','lp-start-inv','lp-base-income','lp-base-expense',
+     'lp-contrib','lp-contrib-end']
       .forEach(id => document.getElementById(id).addEventListener('input', recompute));
+
+    // 積立額を入れたら年額を注記に出す
+    function updateContribHelp() {
+      const m = toInt(document.getElementById('lp-contrib').value) ?? 0;
+      const help = document.getElementById('lp-contrib-help');
+      help.textContent = m > 0
+        ? `年間 ${formatYen(m * 12)} を現預金から運用資産へ`
+        : '現預金から運用資産へ毎月移す額';
+    }
+    document.getElementById('lp-contrib').addEventListener('input', updateContribHelp);
+    updateContribHelp();
 
     // 実績から取り直す
     document.getElementById('reset-assets-btn').addEventListener('click', () => {
@@ -604,6 +652,8 @@
           return_rate: parseFloat(document.getElementById('lp-rate').value) || 0,
           // 開始資産は毎回実績から取り直すため保存しない (null)
           start_assets: null,
+          monthly_contribution: toInt(document.getElementById('lp-contrib').value) ?? 0,
+          contribution_end_year: toInt(document.getElementById('lp-contrib-end').value),
         });
         const events = collectEvents();
         const rows = [];

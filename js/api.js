@@ -427,7 +427,7 @@ export async function updateHousehold({ householdId, updates }) {
 export async function getLifePlanSettings() {
   const { data, error } = await supabase
     .from('life_plan_settings')
-    .select('household_id, start_year, end_year, base_income, base_expense, return_rate, start_assets')
+    .select('household_id, start_year, end_year, base_income, base_expense, return_rate, start_assets, monthly_contribution, contribution_end_year')
     .maybeSingle();
   if (error) throw error;
   return data; // null なら未設定
@@ -444,6 +444,8 @@ export async function saveLifePlanSettings(settings) {
     base_expense: settings.base_expense ?? 0,
     return_rate: settings.return_rate ?? 0,
     start_assets: settings.start_assets ?? null,
+    monthly_contribution: settings.monthly_contribution ?? 0,
+    contribution_end_year: settings.contribution_end_year ?? null,
     updated_at: new Date().toISOString(),
   };
   const { data, error } = await supabase
