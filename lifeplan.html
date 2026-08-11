@@ -66,7 +66,7 @@
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-contrib">毎月の積立額 (円/月)</label>
             <input type="number" id="lp-contrib" class="form-input" inputmode="numeric" placeholder="例: 100000">
-            <p class="form-help" id="lp-contrib-help">現預金から運用資産へ毎月移す額</p>
+            <p class="form-help" id="lp-contrib-help">運用資産に毎月積み立てる額(現預金からは引かれません)</p>
           </div>
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-contrib-end">積立の終了年</label>
@@ -499,8 +499,8 @@
         const growth = invest - investStart - contributedThisYear;
         investPnl = investPnl + growth;
 
-        // 年間収支から積立分を現預金→運用資産へ移す
-        cash = cash + cf - contributedThisYear;
+        // 積立は現預金とは別枠(給与から直接など)なので現預金からは引かない
+        cash = cash + cf;
         const endA = cash + invest;
         const netWorth = endA - loanBal;
 
@@ -551,7 +551,7 @@
       }
       rows.push(`<tr><th class="row-head">年間収支</th>${years.map(d => `<td${cls(d.cf)}>${d.cf >= 0 ? '+' : ''}${man(d.cf)}</td>`).join('')}</tr>`);
       if (years.some(d => d.contribution > 0)) {
-        rows.push(`<tr><th class="row-head">積立</th>${years.map(d => `<td>${d.contribution > 0 ? '-' + man(d.contribution) : '—'}</td>`).join('')}</tr>`);
+        rows.push(`<tr><th class="row-head">積立</th>${years.map(d => `<td>${d.contribution > 0 ? '+' + man(d.contribution) : '—'}</td>`).join('')}</tr>`);
       }
       rows.push(`<tr><th class="row-head">運用益</th>${years.map(d => `<td>+${man(d.growth)}</td>`).join('')}</tr>`);
       rows.push(`<tr class="section-gap"><th class="row-head">現預金</th>${years.map(d => `<td${cls(d.cash)}>${man(d.cash)}</td>`).join('')}</tr>`);
@@ -621,8 +621,8 @@
       const m = toInt(document.getElementById('lp-contrib').value) ?? 0;
       const help = document.getElementById('lp-contrib-help');
       help.textContent = m > 0
-        ? `年間 ${formatYen(m * 12)} を現預金から運用資産へ`
-        : '現預金から運用資産へ毎月移す額';
+        ? `年間 ${formatYen(m * 12)} を運用資産に積立 (現預金からは引かれません)`
+        : '運用資産に毎月積み立てる額(現預金からは引かれません)';
     }
     document.getElementById('lp-contrib').addEventListener('input', updateContribHelp);
     updateContribHelp();
