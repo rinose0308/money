@@ -145,6 +145,23 @@
         </div>
       </div>
 
+      <!-- 金利シナリオ比較 (A/B) -->
+      <div class="card" id="rate-scenario-card" style="display:none; margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">金利シナリオ比較 (A / B)</h3>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+          <strong>シナリオA</strong> = 上のローン表に入力した金利。<strong>シナリオB</strong> = そこに指定の幅を上乗せした金利。<br>
+          金利が上がった場合に負担がどう変わるかを比較できます。
+        </p>
+        <div class="grid cols-2" style="gap: 0.75rem;">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-rate-delta">シナリオB: 金利の上乗せ幅 (%ポイント)</label>
+            <input type="number" id="lp-rate-delta" class="form-input" step="0.1" inputmode="decimal" placeholder="例: 1.0 (空欄=比較しない)">
+            <p class="form-help" id="lp-rate-delta-help">各ローンの金利にこの値を加えて再計算します</p>
+          </div>
+        </div>
+        <div id="rate-scenario-table" style="display:none; margin-top: 0.85rem;"></div>
+      </div>
+
       <!-- 早期返済シミュレーション -->
       <div class="card" id="prepay-card" style="display:none; margin-bottom: 1rem;">
         <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">ローンの早期返済シミュレーション</h3>
@@ -288,6 +305,7 @@
       contribution_end_year: null,
       prepay_year: null,
       prepay_cash_ratio: 80,
+      rate_scenario_delta: null,
     };
 
     // 開始資産は毎回「最新の月次実績」から入れ直す (=月次入力の保存が自動反映される)
@@ -312,6 +330,7 @@
     document.getElementById('lp-contrib-end').value = S.contribution_end_year ?? '';
     document.getElementById('lp-prepay-year').value = S.prepay_year ?? '';
     document.getElementById('lp-prepay-ratio').value = S.prepay_cash_ratio ?? 80;
+    document.getElementById('lp-rate-delta').value = S.rate_scenario_delta ?? '';
     if (incomeIsPlaceholder) {
       document.getElementById('lp-income-help').textContent = '⚠️ 収入の実績がないため、仮に支出と同額を入れています。実際の年収を入力してください。';
       document.getElementById('lp-income-help').style.color = 'var(--warning)';
@@ -391,6 +410,22 @@
       const ra = (ratePct || 0) / 100;
       if (ra === 0) return Math.round(balance / N);
       return Math.round(balance * ra / (1 - Math.pow(1 + ra, -N)));
+    }
+
+    // 指定金利で完済まで返した場合の 年間返済 / 利息総額 / 総支払額
+    function loanTotals(balance, ratePct, startY, completeYear) {
+      const pay = annualPayment(balance, ratePct, completeYear, startY);
+      let bal = balance, interest = 0, paid = 0;
+      if (completeYear != null && pay > 0) {
+        for (let y = startY; y < completeYear && bal > 0; y++) {
+          const int = Math.round(bal * (ratePct || 0) / 100);
+          let p = pay, principal = p - int;
+          if (principal >= bal) { p = bal + int; principal = bal; }
+          bal = Math.max(0, bal - principal);
+          interest += int; paid += p;
+        }
+      }
+      return { pay, interest, paid };
     }
 
     function memberOptions(selectedId) {
@@ -485,34 +520,34 @@
         ln.balance = ln.current_balance;
 
         // このローンを完済まで返した場合の利息総額・総支払額 (金利変更の影響が見えるように)
-        let simBal = ln.current_balance, totalInterest = 0, totalPaid = 0;
-        if (ln.completeYear != null && ln.payment > 0) {
-          for (let y = startY; y < ln.completeYear && simBal > 0; y++) {
-            const int = Math.round(simBal * (ln.interest_rate || 0) / 100);
-            let pay = ln.payment, principal = pay - int;
-            if (principal >= simBal) { pay = simBal + int; principal = simBal; }
-            simBal = Math.max(0, simBal - principal);
-            totalInterest += int; totalPaid += pay;
-          }
-        }
-        ln.totalInterest = totalInterest;
-        ln.totalPaid = totalPaid;
+        const t = loanTotals(ln.current_balance, ln.interest_rate, startY, ln.completeYear);
+        ln.totalInterest = t.interest;
+        ln.totalPaid = t.paid;
 
         // ローン表の計算列を更新
         if (ln._row) {
           ln._row.querySelector('.ln-pay').textContent = ln.payment > 0 ? formatYen(ln.payment) : '—';
-          ln._row.querySelector('.ln-interest').textContent = totalInterest > 0 ? formatYen(totalInterest) : '—';
-          ln._row.querySelector('.ln-totalpay').textContent = totalPaid > 0 ? formatYen(totalPaid) : '—';
+          ln._row.querySelector('.ln-interest').textContent = t.interest > 0 ? formatYen(t.interest) : '—';
+          ln._row.querySelector('.ln-totalpay').textContent = t.paid > 0 ? formatYen(t.paid) : '—';
           ln._row.querySelector('.ln-done').textContent = ln.completeYear ?? '—';
         }
       }
 
       // ---- 投影を1本走らせる (prepayYear を渡すとその年に一括返済) ----
       // ローンの状態は毎回コピーして使う (2シナリオ回すため元データを壊さない)
-      function runProjection({ prepayYear = null, prepayRatio = 80 } = {}) {
+      function runProjection({ prepayYear = null, prepayRatio = 80, rateDelta = 0 } = {}) {
         let cash = startCash, invest = startInvest;
         let investPnl = Math.max(0, Math.min(ACTUAL.pnl ?? 0, invest));
-        const lns = loans.map(l => ({ ...l, balance: l.current_balance }));
+        // rateDelta を上乗せした金利で、年間返済額も再計算し直す
+        const lns = loans.map(l => {
+          const rate = Math.max(0, (l.interest_rate || 0) + rateDelta);
+          return {
+            ...l,
+            interest_rate: rate,
+            payment: rateDelta ? annualPayment(l.current_balance, rate, l.completeYear, startY) : l.payment,
+            balance: l.current_balance,
+          };
+        });
         const years = [];
 
         for (let y = startY; y <= endY; y++) {
@@ -600,14 +635,99 @@
       const doPrepay = hasLoans && prepayYear != null && prepayYear >= startY && prepayYear <= endY;
       const scenario = doPrepay ? runProjection({ prepayYear, prepayRatio }) : null;
 
+      // ---- 金利シナリオB (指定幅を上乗せ) ----
+      const rateDeltaRaw = document.getElementById('lp-rate-delta').value.trim();
+      const rateDelta = rateDeltaRaw === '' ? null : (parseFloat(rateDeltaRaw) || 0);
+      const doRateB = hasLoans && rateDelta != null && rateDelta !== 0;
+      // Bは「今の早期返済設定」を踏襲して比較する
+      const scenarioB = doRateB
+        ? runProjection({ prepayYear: doPrepay ? prepayYear : null, prepayRatio, rateDelta })
+        : null;
+
       // 表とグラフは「早期返済あり」を主役にする(未設定ならベースライン)
       const years = scenario ?? baseline;
 
       refreshLoansVisibility();
       document.getElementById('prepay-card').style.display = hasLoans ? 'block' : 'none';
+      document.getElementById('rate-scenario-card').style.display = hasLoans ? 'block' : 'none';
       renderPrepaySummary(baseline, scenario, prepayYear);
+      renderRateScenario(loans, years, scenarioB, rateDelta, startY);
       renderMatrix(years, hasLoans, hasPnlData);
-      drawChart(baseline, scenario, hasLoans);
+      drawChart(baseline, scenario, scenarioB, hasLoans, rateDelta);
+    }
+
+    // 金利A/B の比較表
+    function renderRateScenario(loans, yearsA, scenarioB, rateDelta, startY) {
+      const el = document.getElementById('rate-scenario-table');
+      if (!scenarioB || rateDelta == null) { el.style.display = 'none'; return; }
+
+      const sign = rateDelta >= 0 ? '+' : '';
+      // ローンごとの A / B 比較
+      const rows = loans.map(ln => {
+        const rateA = ln.interest_rate || 0;
+        const rateB = Math.max(0, rateA + rateDelta);
+        const a = loanTotals(ln.current_balance, rateA, startY, ln.completeYear);
+        const b = loanTotals(ln.current_balance, rateB, startY, ln.completeYear);
+        const name = ln.member_id
+          ? (members.find(m => m.id === ln.member_id)?.name ?? 'ローン')
+          : (ln.label || 'ローン');
+        return { name, rateA, rateB, a, b };
+      });
+      const sumA = rows.reduce((s, r) => s + r.a.interest, 0);
+      const sumB = rows.reduce((s, r) => s + r.b.interest, 0);
+      const sumPayA = rows.reduce((s, r) => s + r.a.pay, 0);
+      const sumPayB = rows.reduce((s, r) => s + r.b.pay, 0);
+
+      // 最終年の純資産の差
+      const lastA = yearsA[yearsA.length - 1];
+      const lastB = scenarioB[scenarioB.length - 1];
+      const netDiff = lastB.netWorth - lastA.netWorth;
+
+      el.style.display = 'block';
+      el.innerHTML = `
+        <div class="table-wrap">
+          <table class="table" style="font-size:0.85rem;">
+            <thead>
+              <tr>
+                <th>ローン</th>
+                <th class="num">金利A</th>
+                <th class="num">金利B</th>
+                <th class="num">年間返済 A→B</th>
+                <th class="num">利息総額 A→B</th>
+                <th class="num">差額</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr>
+                  <td>${escapeHtml(r.name)}</td>
+                  <td class="num">${r.rateA}%</td>
+                  <td class="num"><strong>${r.rateB.toFixed(2)}%</strong></td>
+                  <td class="num">${formatYenShort(r.a.pay)} → ${formatYenShort(r.b.pay)}</td>
+                  <td class="num">${formatYenShort(r.a.interest)} → ${formatYenShort(r.b.interest)}</td>
+                  <td class="num"><span class="card-sub down">+${formatYen(r.b.interest - r.a.interest)}</span></td>
+                </tr>`).join('')}
+              <tr class="emphasis" style="background:#f8fafc;">
+                <td><strong>合計</strong></td>
+                <td class="num">—</td>
+                <td class="num">${sign}${rateDelta}pt</td>
+                <td class="num">${formatYenShort(sumPayA)} → ${formatYenShort(sumPayB)}<br><span style="font-size:0.75rem;color:var(--text-muted);">(年 +${formatYen(sumPayB - sumPayA)})</span></td>
+                <td class="num">${formatYenShort(sumA)} → ${formatYenShort(sumB)}</td>
+                <td class="num"><strong class="card-sub down">+${formatYen(sumB - sumA)}</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="margin-top:0.75rem; padding-top:0.75rem; border-top:1px dashed var(--border); display:flex; justify-content:space-between; gap:0.5rem; flex-wrap:wrap;">
+          <span>${lastA.y}年時点の純資産の差 (B − A)</span>
+          <strong class="${netDiff >= 0 ? 'card-sub up' : 'card-sub down'}" style="font-size:1rem; font-variant-numeric:tabular-nums;">
+            ${netDiff >= 0 ? '+' : ''}${formatYen(netDiff)}
+          </strong>
+        </div>
+        <div style="font-size:0.82rem; color:var(--text-muted); margin-top:0.25rem;">
+          金利が${sign}${rateDelta}pt動くと、利息総額は <strong>${formatYen(sumB - sumA)}</strong> 増え、
+          毎年の返済は <strong>${formatYen(sumPayB - sumPayA)}</strong> 増えます。
+        </div>`;
     }
 
     // 早期返済の効果サマリー
@@ -713,12 +833,32 @@
       tb.innerHTML = rows.join('');
     }
 
-    function drawChart(baseline, scenario, hasLoans) {
+    function drawChart(baseline, scenario, scenarioB, hasLoans, rateDelta) {
       const ctx = document.getElementById('lp-chart').getContext('2d');
       const labels = baseline.map(d => String(d.y));
       const datasets = [];
+      const main = scenario ?? baseline;   // 早期返済の設定があればそちらが主役
 
-      if (scenario) {
+      if (scenarioB) {
+        // 金利A/Bの比較 (純資産ベース)
+        datasets.push({
+          label: `金利A${scenario ? ' (早期返済あり)' : ''}`, data: main.map(d => d.netWorth),
+          borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.12)',
+          fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2,
+        });
+        datasets.push({
+          label: `金利B (${rateDelta >= 0 ? '+' : ''}${rateDelta}pt)`, data: scenarioB.map(d => d.netWorth),
+          borderColor: '#f59e0b', backgroundColor: 'transparent',
+          fill: false, tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2,
+        });
+        if (scenario) {
+          datasets.push({
+            label: '早期返済しない (金利A)', data: baseline.map(d => d.netWorth),
+            borderColor: '#94a3b8', backgroundColor: 'transparent', borderDash: [5, 4],
+            fill: false, tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 1.5,
+          });
+        }
+      } else if (scenario) {
         // 早期返済の比較: 純資産(ローン差引)で2本を並べる
         datasets.push({
           label: '早期返済する', data: scenario.map(d => d.netWorth),
@@ -770,7 +910,7 @@
 
     // 前提の変更で即再計算
     ['lp-start','lp-end','lp-rate','lp-start-cash','lp-start-inv','lp-base-income','lp-base-expense',
-     'lp-contrib','lp-contrib-end','lp-prepay-year','lp-prepay-ratio']
+     'lp-contrib','lp-contrib-end','lp-prepay-year','lp-prepay-ratio','lp-rate-delta']
       .forEach(id => document.getElementById(id).addEventListener('input', recompute));
 
     // 一括返済年を入れたら「何年後」を注記に出す
@@ -822,6 +962,10 @@
           contribution_end_year: toInt(document.getElementById('lp-contrib-end').value),
           prepay_year: toInt(document.getElementById('lp-prepay-year').value),
           prepay_cash_ratio: parseFloat(document.getElementById('lp-prepay-ratio').value) || 0,
+          rate_scenario_delta: (() => {
+            const v = document.getElementById('lp-rate-delta').value.trim();
+            return v === '' ? null : (parseFloat(v) || 0);
+          })(),
         });
         const events = collectEvents();
         const rows = [];
