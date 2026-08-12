@@ -143,6 +143,27 @@
         </div>
       </div>
 
+      <!-- 早期返済シミュレーション -->
+      <div class="card" id="prepay-card" style="display:none; margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">ローンの早期返済シミュレーション</h3>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+          指定した年にローン残高を一括返済した場合を試算します。返済原資は<strong>その時点の現預金を指定割合まで使い、足りない分は運用資産を取り崩す</strong>想定です。
+        </p>
+        <div class="grid cols-2" style="gap: 0.75rem;">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-prepay-year">一括返済する年</label>
+            <input type="number" id="lp-prepay-year" class="form-input" min="2000" max="2100" placeholder="空欄=しない">
+            <p class="form-help" id="lp-prepay-help">この年の初めに残高を全額返済します</p>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-prepay-ratio">現預金から充てる割合 (%)</label>
+            <input type="number" id="lp-prepay-ratio" class="form-input" min="0" max="100" step="5" value="80">
+            <p class="form-help">残りは運用資産(株・投信)を取り崩します</p>
+          </div>
+        </div>
+        <div id="prepay-summary" style="display:none; margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px dashed var(--border); font-size: 0.88rem;"></div>
+      </div>
+
       <!-- グラフ -->
       <h2 class="section-title">資産予測</h2>
       <div class="card" style="margin-bottom: 1rem;">
@@ -205,7 +226,7 @@
         ? `<div class="empty-state" style="max-width:520px;margin:0 auto;">
              <h3>データベースの準備が必要です</h3>
              <p style="margin:0.5rem 0;">ライフプラン用のテーブルがまだ作成されていません。<br>
-             Supabase の SQL Editor で <code>0006_life_plan.sql</code> / <code>0007_life_plan_loans.sql</code> / <code>0008_life_plan_contribution.sql</code> を実行してください。</p>
+             Supabase の SQL Editor で <code>0006</code>〜<code>0009</code> のマイグレーション(<code>supabase/migrations/</code>)を実行してください。</p>
              <button class="btn btn-primary btn-sm" onclick="location.reload()">実行したら再読み込み</button>
            </div>`
         : `<div class="empty-state" style="max-width:520px;margin:0 auto;">
@@ -263,6 +284,8 @@
       return_rate: 3,
       monthly_contribution: 0,
       contribution_end_year: null,
+      prepay_year: null,
+      prepay_cash_ratio: 80,
     };
 
     // 開始資産は毎回「最新の月次実績」から入れ直す (=月次入力の保存が自動反映される)
@@ -285,6 +308,8 @@
     document.getElementById('lp-base-expense').value = S.base_expense ?? 0;
     document.getElementById('lp-contrib').value = S.monthly_contribution ?? 0;
     document.getElementById('lp-contrib-end').value = S.contribution_end_year ?? '';
+    document.getElementById('lp-prepay-year').value = S.prepay_year ?? '';
+    document.getElementById('lp-prepay-ratio').value = S.prepay_cash_ratio ?? 80;
     if (incomeIsPlaceholder) {
       document.getElementById('lp-income-help').textContent = '⚠️ 収入の実績がないため、仮に支出と同額を入れています。実際の年収を入力してください。';
       document.getElementById('lp-income-help').style.color = 'var(--warning)';
@@ -432,10 +457,8 @@
       const baseInc = toInt(document.getElementById('lp-base-income').value) ?? 0;
       const baseExp = toInt(document.getElementById('lp-base-expense').value) ?? 0;
       // 現預金と運用資産を分けて追跡 (利回りは運用資産にのみ適用)
-      let cash = toInt(document.getElementById('lp-start-cash').value) ?? 0;
-      let invest = toInt(document.getElementById('lp-start-inv').value) ?? 0;
-      // 運用資産のうち含み益。以後の運用益は含み益、積立額は元本として積み上がる
-      let investPnl = Math.max(0, Math.min(ACTUAL.pnl ?? 0, invest));
+      const startCash = toInt(document.getElementById('lp-start-cash').value) ?? 0;
+      const startInvest = toInt(document.getElementById('lp-start-inv').value) ?? 0;
       // 積立設定
       const monthlyContrib = toInt(document.getElementById('lp-contrib').value) ?? 0;
       const contribEndYear = toInt(document.getElementById('lp-contrib-end').value);
@@ -459,66 +482,158 @@
         }
       }
 
-      const labels = [], endAssetsArr = [], netWorthArr = [], loanBalArr = [], years = [];
+      // ---- 投影を1本走らせる (prepayYear を渡すとその年に一括返済) ----
+      // ローンの状態は毎回コピーして使う (2シナリオ回すため元データを壊さない)
+      function runProjection({ prepayYear = null, prepayRatio = 80 } = {}) {
+        let cash = startCash, invest = startInvest;
+        let investPnl = Math.max(0, Math.min(ACTUAL.pnl ?? 0, invest));
+        const lns = loans.map(l => ({ ...l, balance: l.current_balance }));
+        const years = [];
 
-      for (let y = startY; y <= endY; y++) {
-        const ev = events.get(y) ?? {};
-        const inc = (ev.income != null) ? ev.income : baseInc;
-        const exp = (ev.expense != null) ? ev.expense : baseExp;
+        for (let y = startY; y <= endY; y++) {
+          const ev = events.get(y) ?? {};
+          const inc = (ev.income != null) ? ev.income : baseInc;
+          const exp = (ev.expense != null) ? ev.expense : baseExp;
 
-        // この年のローン返済と残高
-        let loanPay = 0, loanBal = 0;
-        for (const ln of loans) {
-          if (ln.completeYear != null && y < ln.completeYear && ln.balance > 0) {
-            const interest = Math.round(ln.balance * (ln.interest_rate || 0) / 100);
-            let pay = ln.payment;
-            let principal = pay - interest;
-            if (principal >= ln.balance) { pay = ln.balance + interest; principal = ln.balance; } // 最終年
-            ln.balance = Math.max(0, ln.balance - principal);
-            loanPay += pay;
+          // 一括返済 (年初に実行)
+          let prepayAmount = 0, prepayFromCash = 0, prepayFromInvest = 0;
+          if (prepayYear != null && y === prepayYear) {
+            const outstanding = lns.reduce((s, ln) =>
+              s + ((ln.completeYear != null && y < ln.completeYear) ? ln.balance : 0), 0);
+            if (outstanding > 0) {
+              prepayAmount = outstanding;
+              // 現預金を指定割合まで使い、足りない分は運用資産を取り崩す
+              prepayFromCash = Math.min(Math.max(0, Math.round(cash * prepayRatio / 100)), outstanding);
+              prepayFromInvest = outstanding - prepayFromCash;
+              cash -= prepayFromCash;
+              if (prepayFromInvest > 0) {
+                // 取り崩しは元本・含み益を按分して減らす
+                const pnlShare = invest > 0 ? investPnl / invest : 0;
+                const sell = Math.min(prepayFromInvest, invest);
+                invest -= sell;
+                investPnl = Math.max(0, Math.round(investPnl - sell * pnlShare));
+                // 運用資産が足りない場合は残りを現預金から (マイナスも許容して可視化)
+                if (sell < prepayFromInvest) cash -= (prepayFromInvest - sell);
+              }
+              for (const ln of lns) ln.balance = 0;
+            }
           }
-          loanBal += ln.balance;
+
+          // この年のローン返済と残高
+          let loanPay = 0, loanBal = 0, loanInterest = 0;
+          for (const ln of lns) {
+            if (ln.completeYear != null && y < ln.completeYear && ln.balance > 0) {
+              const interest = Math.round(ln.balance * (ln.interest_rate || 0) / 100);
+              let pay = ln.payment;
+              let principal = pay - interest;
+              if (principal >= ln.balance) { pay = ln.balance + interest; principal = ln.balance; } // 最終年
+              ln.balance = Math.max(0, ln.balance - principal);
+              loanPay += pay;
+              loanInterest += interest;
+            }
+            loanBal += ln.balance;
+          }
+
+          const cf = inc - exp - loanPay;
+
+          // 積立: この年に積み立てるか (終了年の指定があればその年まで)
+          const contributing = monthlyContrib > 0 && (contribEndYear == null || y <= contribEndYear);
+          const monthlyAdd = contributing ? monthlyContrib : 0;
+
+          // 運用資産は月次複利で計算 (毎月 利回り/12 で増やし、積立額を足す)
+          const investStart = invest;
+          let contributedThisYear = 0;
+          for (let mo = 0; mo < 12; mo++) {
+            invest += invest * (rate / 12);
+            invest += monthlyAdd;
+            contributedThisYear += monthlyAdd;
+          }
+          invest = Math.round(invest);
+          // 増えた分のうち積立を除いたものが運用益(=含み益)
+          const growth = invest - investStart - contributedThisYear;
+          investPnl = investPnl + growth;
+
+          // 積立は現預金とは別枠(給与から直接など)なので現預金からは引かない
+          cash = cash + cf;
+          const endA = cash + invest;
+
+          years.push({
+            y, age: ageCell(y), inc, exp, loanPay, loanInterest, cf, growth,
+            contribution: contributedThisYear,
+            prepayAmount, prepayFromCash, prepayFromInvest,
+            cash, invest, investPnl, investPrincipal: invest - investPnl,
+            endA, loanBal, netWorth: endA - loanBal, note: ev.note ?? '',
+          });
         }
-
-        const cf = inc - exp - loanPay;
-
-        // 積立: この年に積み立てるか (終了年の指定があればその年まで)
-        const contributing = monthlyContrib > 0 && (contribEndYear == null || y <= contribEndYear);
-        const monthlyAdd = contributing ? monthlyContrib : 0;
-
-        // 運用資産は月次複利で計算 (毎月 利回り/12 で増やし、積立額を足す)
-        const investStart = invest;
-        let contributedThisYear = 0;
-        for (let mo = 0; mo < 12; mo++) {
-          invest += invest * (rate / 12);
-          invest += monthlyAdd;
-          contributedThisYear += monthlyAdd;
-        }
-        invest = Math.round(invest);
-        // 増えた分のうち積立を除いたものが運用益(=含み益)
-        const growth = invest - investStart - contributedThisYear;
-        investPnl = investPnl + growth;
-
-        // 積立は現預金とは別枠(給与から直接など)なので現預金からは引かない
-        cash = cash + cf;
-        const endA = cash + invest;
-        const netWorth = endA - loanBal;
-
-        years.push({
-          y, age: ageCell(y), inc, exp, loanPay, cf, growth,
-          contribution: contributedThisYear,
-          cash, invest, investPnl, investPrincipal: invest - investPnl,
-          endA, loanBal, note: ev.note ?? '',
-        });
-
-        labels.push(String(y));
-        endAssetsArr.push(endA);
-        netWorthArr.push(netWorth);
-        loanBalArr.push(loanBal);
+        return years;
       }
+
+      // ---- ベースライン(繰上返済なし) と 早期返済シナリオ ----
+      const baseline = runProjection();
+      const prepayYear = toInt(document.getElementById('lp-prepay-year').value);
+      const prepayRatio = Math.min(100, Math.max(0, parseFloat(document.getElementById('lp-prepay-ratio').value) || 0));
+      const doPrepay = hasLoans && prepayYear != null && prepayYear >= startY && prepayYear <= endY;
+      const scenario = doPrepay ? runProjection({ prepayYear, prepayRatio }) : null;
+
+      // 表とグラフは「早期返済あり」を主役にする(未設定ならベースライン)
+      const years = scenario ?? baseline;
+
       refreshLoansVisibility();
+      document.getElementById('prepay-card').style.display = hasLoans ? 'block' : 'none';
+      renderPrepaySummary(baseline, scenario, prepayYear);
       renderMatrix(years, hasLoans, hasPnlData);
-      drawChart(labels, endAssetsArr, hasLoans ? netWorthArr : null);
+      drawChart(baseline, scenario, hasLoans);
+    }
+
+    // 早期返済の効果サマリー
+    function renderPrepaySummary(baseline, scenario, prepayYear) {
+      const el = document.getElementById('prepay-summary');
+      if (!scenario) { el.style.display = 'none'; return; }
+
+      const pay = scenario.find(d => d.y === prepayYear);
+      const lastS = scenario[scenario.length - 1];
+      const lastB = baseline[baseline.length - 1];
+      const diff = lastS.netWorth - lastB.netWorth;
+
+      // 返済後に純資産が追いつく年 (早期返済が有利に転じる年)
+      let breakEven = null;
+      for (let i = 0; i < scenario.length; i++) {
+        if (scenario[i].y >= prepayYear && scenario[i].netWorth >= baseline[i].netWorth) { breakEven = scenario[i].y; break; }
+      }
+
+      // 利息の節約額 = 支払う利息の総額の差 (元本は返済方法によらず同額なので利息だけを比較)
+      const intB = baseline.reduce((s, d) => s + (d.loanInterest || 0), 0);
+      const intS = scenario.reduce((s, d) => s + (d.loanInterest || 0), 0);
+      const saved = intB - intS;
+
+      el.style.display = 'block';
+      el.innerHTML = `
+        <div style="display:grid; gap:0.4rem;">
+          <div style="display:flex; justify-content:space-between; gap:0.5rem;">
+            <span style="color:var(--text-muted);">${prepayYear}年に一括返済する額</span>
+            <strong style="font-variant-numeric:tabular-nums;">${formatYen(pay?.prepayAmount ?? 0)}</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; gap:0.5rem;">
+            <span style="color:var(--text-muted);">└ 内訳</span>
+            <span style="font-variant-numeric:tabular-nums;">現預金 ${formatYenShort(pay?.prepayFromCash ?? 0)} / 運用取り崩し ${formatYenShort(pay?.prepayFromInvest ?? 0)}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; gap:0.5rem;">
+            <span style="color:var(--text-muted);">利息の節約額</span>
+            <span class="card-sub up" style="font-weight:600; font-variant-numeric:tabular-nums;">${saved >= 0 ? '+' : ''}${formatYen(saved)}</span>
+          </div>
+          <hr style="border:none; border-top:1px solid var(--border); margin:0.25rem 0;">
+          <div style="display:flex; justify-content:space-between; gap:0.5rem;">
+            <span>${lastS.y}年時点の純資産の差</span>
+            <strong class="${diff >= 0 ? 'card-sub up' : 'card-sub down'}" style="font-size:1rem; font-variant-numeric:tabular-nums;">
+              ${diff >= 0 ? '+' : ''}${formatYen(diff)}
+            </strong>
+          </div>
+          <div style="font-size:0.82rem; color:var(--text-muted);">
+            ${diff >= 0
+              ? `早期返済したほうが最終的に有利です${breakEven ? ` (${breakEven}年に追いつきます)` : ''}。`
+              : `運用を続けたほうが最終的に有利という結果です (利回り ${document.getElementById('lp-rate').value}% がローン金利を上回るため)。`}
+          </div>
+        </div>`;
     }
 
     // 年を横に並べたキャッシュフロー表を描画
@@ -549,6 +664,9 @@
       if (hasLoans) {
         rows.push(`<tr><th class="row-head">ローン返済</th>${years.map(d => `<td>${d.loanPay > 0 ? '-' + man(d.loanPay) : '—'}</td>`).join('')}</tr>`);
       }
+      if (years.some(d => (d.prepayAmount ?? 0) > 0)) {
+        rows.push(`<tr class="emphasis"><th class="row-head">一括返済</th>${years.map(d => `<td${(d.prepayAmount ?? 0) > 0 ? ' class="neg"' : ''}>${(d.prepayAmount ?? 0) > 0 ? '-' + man(d.prepayAmount) : '—'}</td>`).join('')}</tr>`);
+      }
       rows.push(`<tr><th class="row-head">年間収支</th>${years.map(d => `<td${cls(d.cf)}>${d.cf >= 0 ? '+' : ''}${man(d.cf)}</td>`).join('')}</tr>`);
       if (years.some(d => d.contribution > 0)) {
         rows.push(`<tr><th class="row-head">積立</th>${years.map(d => `<td>${d.contribution > 0 ? '+' + man(d.contribution) : '—'}</td>`).join('')}</tr>`);
@@ -570,23 +688,37 @@
       tb.innerHTML = rows.join('');
     }
 
-    function drawChart(labels, endAssetsArr, netWorthArr) {
+    function drawChart(baseline, scenario, hasLoans) {
       const ctx = document.getElementById('lp-chart').getContext('2d');
-      const datasets = [{
-        label: netWorthArr ? '金融資産' : '年末資産(予測)',
-        data: endAssetsArr,
-        borderColor: '#2563eb',
-        backgroundColor: 'rgba(37,99,235,0.12)',
-        fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
-      }];
-      if (netWorthArr) {
+      const labels = baseline.map(d => String(d.y));
+      const datasets = [];
+
+      if (scenario) {
+        // 早期返済の比較: 純資産(ローン差引)で2本を並べる
         datasets.push({
-          label: '純資産(ローン差引)',
-          data: netWorthArr,
-          borderColor: '#8b5cf6',
-          backgroundColor: 'transparent',
-          fill: false, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
+          label: '早期返済する', data: scenario.map(d => d.netWorth),
+          borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.12)',
+          fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2,
         });
+        datasets.push({
+          label: '早期返済しない', data: baseline.map(d => d.netWorth),
+          borderColor: '#94a3b8', backgroundColor: 'transparent', borderDash: [5, 4],
+          fill: false, tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2,
+        });
+      } else {
+        datasets.push({
+          label: hasLoans ? '金融資産' : '年末資産(予測)',
+          data: baseline.map(d => d.endA),
+          borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.12)',
+          fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
+        });
+        if (hasLoans) {
+          datasets.push({
+            label: '純資産(ローン差引)', data: baseline.map(d => d.netWorth),
+            borderColor: '#8b5cf6', backgroundColor: 'transparent',
+            fill: false, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
+          });
+        }
       }
       if (TARGET != null && TARGET > 0) {
         datasets.push({
@@ -613,8 +745,17 @@
 
     // 前提の変更で即再計算
     ['lp-start','lp-end','lp-rate','lp-start-cash','lp-start-inv','lp-base-income','lp-base-expense',
-     'lp-contrib','lp-contrib-end']
+     'lp-contrib','lp-contrib-end','lp-prepay-year','lp-prepay-ratio']
       .forEach(id => document.getElementById(id).addEventListener('input', recompute));
+
+    // 一括返済年を入れたら「何年後」を注記に出す
+    document.getElementById('lp-prepay-year').addEventListener('input', () => {
+      const y = toInt(document.getElementById('lp-prepay-year').value);
+      const help = document.getElementById('lp-prepay-help');
+      help.textContent = (y != null && y > nowYear)
+        ? `${y - nowYear}年後。この年の初めに残高を全額返済します`
+        : 'この年の初めに残高を全額返済します';
+    });
 
     // 積立額を入れたら年額を注記に出す
     function updateContribHelp() {
@@ -654,6 +795,8 @@
           start_assets: null,
           monthly_contribution: toInt(document.getElementById('lp-contrib').value) ?? 0,
           contribution_end_year: toInt(document.getElementById('lp-contrib-end').value),
+          prepay_year: toInt(document.getElementById('lp-prepay-year').value),
+          prepay_cash_ratio: parseFloat(document.getElementById('lp-prepay-ratio').value) || 0,
         });
         const events = collectEvents();
         const rows = [];
