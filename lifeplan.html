@@ -131,6 +131,8 @@
                 <th class="num">借入年</th>
                 <th class="num">返済年数</th>
                 <th class="num">年間返済</th>
+                <th class="num">利息総額</th>
+                <th class="num">総支払額</th>
                 <th class="num">完済年</th>
                 <th style="width:40px;"></th>
               </tr>
@@ -406,11 +408,17 @@
         <td class="num" data-label="借入年"><input type="number" class="form-input ln-start" min="1990" max="2100" style="text-align:right; max-width:90px;" value="${loan.start_year ?? ''}"></td>
         <td class="num" data-label="返済年数"><input type="number" class="form-input ln-term" min="1" max="50" style="text-align:right; max-width:80px;" value="${loan.term_years ?? ''}"></td>
         <td class="num" data-label="年間返済"><span class="ln-pay" style="font-variant-numeric:tabular-nums;">—</span></td>
+        <td class="num" data-label="利息総額"><span class="ln-interest" style="font-variant-numeric:tabular-nums; color:var(--danger);">—</span></td>
+        <td class="num" data-label="総支払額"><span class="ln-totalpay" style="font-variant-numeric:tabular-nums;">—</span></td>
         <td class="num" data-label="完済年"><span class="ln-done">—</span></td>
         <td class="actions-cell"><button type="button" class="btn btn-ghost btn-sm ln-del" title="削除">✕</button></td>
       `;
       tr.querySelector('.ln-del').addEventListener('click', () => { tr.remove(); refreshLoansVisibility(); recompute(); });
-      tr.querySelectorAll('input, select').forEach(inp => inp.addEventListener('input', recompute));
+      // 金利や残高を変えたら即再計算 (change だけでなく input でも拾う)
+      tr.querySelectorAll('input, select').forEach(inp => {
+        inp.addEventListener('input', recompute);
+        inp.addEventListener('change', recompute);
+      });
       loansTbody.appendChild(tr);
       refreshLoansVisibility();
     }
@@ -475,9 +483,26 @@
         ln.completeYear = (ln.start_year != null && ln.term_years != null) ? (ln.start_year + ln.term_years) : null;
         ln.payment = annualPayment(ln.current_balance, ln.interest_rate, ln.completeYear, startY);
         ln.balance = ln.current_balance;
+
+        // このローンを完済まで返した場合の利息総額・総支払額 (金利変更の影響が見えるように)
+        let simBal = ln.current_balance, totalInterest = 0, totalPaid = 0;
+        if (ln.completeYear != null && ln.payment > 0) {
+          for (let y = startY; y < ln.completeYear && simBal > 0; y++) {
+            const int = Math.round(simBal * (ln.interest_rate || 0) / 100);
+            let pay = ln.payment, principal = pay - int;
+            if (principal >= simBal) { pay = simBal + int; principal = simBal; }
+            simBal = Math.max(0, simBal - principal);
+            totalInterest += int; totalPaid += pay;
+          }
+        }
+        ln.totalInterest = totalInterest;
+        ln.totalPaid = totalPaid;
+
         // ローン表の計算列を更新
         if (ln._row) {
           ln._row.querySelector('.ln-pay').textContent = ln.payment > 0 ? formatYen(ln.payment) : '—';
+          ln._row.querySelector('.ln-interest').textContent = totalInterest > 0 ? formatYen(totalInterest) : '—';
+          ln._row.querySelector('.ln-totalpay').textContent = totalPaid > 0 ? formatYen(totalPaid) : '—';
           ln._row.querySelector('.ln-done').textContent = ln.completeYear ?? '—';
         }
       }
