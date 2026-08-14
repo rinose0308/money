@@ -427,7 +427,7 @@ export async function updateHousehold({ householdId, updates }) {
 export async function getLifePlanSettings() {
   const { data, error } = await supabase
     .from('life_plan_settings')
-    .select('household_id, start_year, end_year, base_income, base_expense, return_rate, start_assets, monthly_contribution, contribution_end_year, prepay_year, prepay_cash_ratio, rate_scenario_delta')
+    .select('household_id, start_year, end_year, base_income, base_expense, return_rate, start_assets, monthly_contribution, contribution_end_year, prepay_year, prepay_cash_ratio, rate_scenario_delta, inflation_rate, retirement_year, retirement_lump_sum, pension_start_year, pension_annual, withdrawal_rate')
     .maybeSingle();
   if (error) throw error;
   return data; // null なら未設定
@@ -449,6 +449,12 @@ export async function saveLifePlanSettings(settings) {
     prepay_year: settings.prepay_year ?? null,
     prepay_cash_ratio: settings.prepay_cash_ratio ?? 80,
     rate_scenario_delta: settings.rate_scenario_delta ?? null,
+    inflation_rate: settings.inflation_rate ?? 0,
+    retirement_year: settings.retirement_year ?? null,
+    retirement_lump_sum: settings.retirement_lump_sum ?? null,
+    pension_start_year: settings.pension_start_year ?? null,
+    pension_annual: settings.pension_annual ?? null,
+    withdrawal_rate: settings.withdrawal_rate ?? null,
     updated_at: new Date().toISOString(),
   };
   const { data, error } = await supabase

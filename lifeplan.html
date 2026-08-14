@@ -64,6 +64,11 @@
             <p class="form-help">毎年の支出の目安</p>
           </div>
           <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-inflation">想定インフレ率 (%)</label>
+            <input type="number" id="lp-inflation" class="form-input" step="0.1" inputmode="decimal" placeholder="例: 2">
+            <p class="form-help" id="lp-inflation-help">支出が毎年この率で増える想定</p>
+          </div>
+          <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-contrib">毎月の積立額 (円/月)</label>
             <input type="number" id="lp-contrib" class="form-input" inputmode="numeric" placeholder="例: 100000">
             <p class="form-help" id="lp-contrib-help">運用資産に毎月積み立てる額(現預金からは引かれません)</p>
@@ -109,6 +114,42 @@
         <div id="events-empty" style="color: var(--text-muted); font-size: 0.9rem; padding: 0.5rem 0;">
           特別な年はまだありません。「＋ 追加」で登録できます。
         </div>
+      </div>
+
+      <!-- 退職・年金 -->
+      <div class="card" style="margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">退職・年金</h3>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+          退職年以降は給与収入が止まり、年金の受給開始年からは年金額が収入になります。老後に資産が持つかを見るための項目です。
+        </p>
+        <div class="grid cols-2" style="gap: 0.75rem;">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-retire-year">退職する年</label>
+            <input type="number" id="lp-retire-year" class="form-input" min="2000" max="2100" placeholder="空欄=設定しない">
+            <p class="form-help" id="lp-retire-help">この年以降、年間収入は0になります</p>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-retire-lump">退職金 (円)</label>
+            <input type="number" id="lp-retire-lump" class="form-input" inputmode="numeric" placeholder="例: 20000000">
+            <p class="form-help">退職年に現預金へ加算されます</p>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-pension-year">年金の受給開始年</label>
+            <input type="number" id="lp-pension-year" class="form-input" min="2000" max="2100" placeholder="例: 2055">
+            <p class="form-help" id="lp-pension-help">65歳になる年など</p>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-pension-annual">年金の年額 (円/年)</label>
+            <input type="number" id="lp-pension-annual" class="form-input" inputmode="numeric" placeholder="例: 2800000">
+            <p class="form-help">世帯合計。受給開始年から毎年の収入になります</p>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-withdrawal">取り崩し率 (%)</label>
+            <input type="number" id="lp-withdrawal" class="form-input" step="0.1" inputmode="decimal" placeholder="例: 4 (空欄=制限なし)">
+            <p class="form-help">退職後、年初資産のこの割合を上限に取り崩す(4%ルールなど)</p>
+          </div>
+        </div>
+        <div id="longevity-summary" style="display:none; margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px dashed var(--border); font-size: 0.9rem;"></div>
       </div>
 
       <!-- 住宅ローン -->
@@ -306,6 +347,12 @@
       prepay_year: null,
       prepay_cash_ratio: 80,
       rate_scenario_delta: null,
+      inflation_rate: 0,
+      retirement_year: null,
+      retirement_lump_sum: null,
+      pension_start_year: null,
+      pension_annual: null,
+      withdrawal_rate: null,
     };
 
     // 開始資産は毎回「最新の月次実績」から入れ直す (=月次入力の保存が自動反映される)
@@ -331,6 +378,12 @@
     document.getElementById('lp-prepay-year').value = S.prepay_year ?? '';
     document.getElementById('lp-prepay-ratio').value = S.prepay_cash_ratio ?? 80;
     document.getElementById('lp-rate-delta').value = S.rate_scenario_delta ?? '';
+    document.getElementById('lp-inflation').value = S.inflation_rate ?? 0;
+    document.getElementById('lp-retire-year').value = S.retirement_year ?? '';
+    document.getElementById('lp-retire-lump').value = S.retirement_lump_sum ?? '';
+    document.getElementById('lp-pension-year').value = S.pension_start_year ?? '';
+    document.getElementById('lp-pension-annual').value = S.pension_annual ?? '';
+    document.getElementById('lp-withdrawal').value = S.withdrawal_rate ?? '';
     if (incomeIsPlaceholder) {
       document.getElementById('lp-income-help').textContent = '⚠️ 収入の実績がないため、仮に支出と同額を入れています。実際の年収を入力してください。';
       document.getElementById('lp-income-help').style.color = 'var(--warning)';
@@ -506,6 +559,14 @@
       const monthlyContrib = toInt(document.getElementById('lp-contrib').value) ?? 0;
       const contribEndYear = toInt(document.getElementById('lp-contrib-end').value);
       const hasPnlData = (ACTUAL.pnl ?? 0) !== 0 || monthlyContrib > 0;
+      // インフレ率・退職・年金・取り崩し率
+      const inflation = (parseFloat(document.getElementById('lp-inflation').value) || 0) / 100;
+      const retireYear = toInt(document.getElementById('lp-retire-year').value);
+      const retireLump = toInt(document.getElementById('lp-retire-lump').value) ?? 0;
+      const pensionYear = toInt(document.getElementById('lp-pension-year').value);
+      const pensionAnnual = toInt(document.getElementById('lp-pension-annual').value) ?? 0;
+      const wdRaw = document.getElementById('lp-withdrawal').value.trim();
+      const withdrawalRate = wdRaw === '' ? null : (parseFloat(wdRaw) || 0) / 100;
 
       if (endY < startY || endY - startY > 100) { tbody.innerHTML = ''; return; }
 
@@ -552,8 +613,25 @@
 
         for (let y = startY; y <= endY; y++) {
           const ev = events.get(y) ?? {};
-          const inc = (ev.income != null) ? ev.income : baseInc;
-          const exp = (ev.expense != null) ? ev.expense : baseExp;
+          const elapsed = y - startY;
+          const infFactor = Math.pow(1 + inflation, elapsed);
+
+          // 支出はインフレで毎年増える (その年を手入力している場合はその額をそのまま使う)
+          const exp = (ev.expense != null) ? ev.expense : Math.round(baseExp * infFactor);
+
+          // 収入: 退職年以降は給与0。年金開始年以降は年金額。手入力があれば最優先。
+          const retired = retireYear != null && y >= retireYear;
+          const gettingPension = pensionYear != null && y >= pensionYear;
+          let inc;
+          if (ev.income != null) {
+            inc = ev.income;
+          } else {
+            inc = retired ? 0 : baseInc;
+            if (gettingPension) inc += pensionAnnual;
+          }
+
+          // 退職金 (退職年に一時金として受け取る)
+          const lumpSum = (retireYear != null && y === retireYear) ? retireLump : 0;
 
           // 一括返済 (年初に実行)
           let prepayAmount = 0, prepayFromCash = 0, prepayFromInvest = 0;
@@ -594,10 +672,13 @@
             loanBal += ln.balance;
           }
 
-          const cf = inc - exp - loanPay;
+          // 年間収支 (退職金は一時収入として加算)
+          const cf = inc + lumpSum - exp - loanPay;
 
           // 積立: この年に積み立てるか (終了年の指定があればその年まで)
-          const contributing = monthlyContrib > 0 && (contribEndYear == null || y <= contribEndYear);
+          // 退職後は給与がないため積立も止める
+          const contributing = monthlyContrib > 0 && !retired
+            && (contribEndYear == null || y <= contribEndYear);
           const monthlyAdd = contributing ? monthlyContrib : 0;
 
           // 運用資産は月次複利で計算 (毎月 利回り/12 で増やし、積立額を足す)
@@ -615,12 +696,34 @@
 
           // 積立は現預金とは別枠(給与から直接など)なので現預金からは引かない
           cash = cash + cf;
+
+          // 赤字で現預金が尽きたら運用資産を取り崩す (退職後の生活費を賄うイメージ)
+          // 取り崩し率の指定があれば、その年に取り崩せる額に上限をかける
+          let withdrawal = 0, withdrawalCapped = false;
+          if (cash < 0 && invest > 0) {
+            const need = -cash;
+            let allowed = need;
+            if (withdrawalRate != null) {
+              const cap = Math.round(investStart * withdrawalRate);
+              if (cap < need) { allowed = Math.max(0, cap); withdrawalCapped = true; }
+            }
+            const sell = Math.min(allowed, invest);
+            if (sell > 0) {
+              const pnlShare = invest > 0 ? investPnl / invest : 0;
+              invest -= sell;
+              investPnl = Math.max(0, Math.round(investPnl - sell * pnlShare));
+              cash += sell;
+              withdrawal = sell;
+            }
+          }
+
           const endA = cash + invest;
 
           years.push({
             y, age: ageCell(y), inc, exp, loanPay, loanInterest, cf, growth,
             contribution: contributedThisYear,
             prepayAmount, prepayFromCash, prepayFromInvest,
+            lumpSum, withdrawal, withdrawalCapped, retired, pension: (!retired || ev.income != null) ? 0 : (gettingPension ? pensionAnnual : 0),
             cash, invest, investPnl, investPrincipal: invest - investPnl,
             endA, loanBal, netWorth: endA - loanBal, note: ev.note ?? '',
           });
@@ -650,10 +753,50 @@
       refreshLoansVisibility();
       document.getElementById('prepay-card').style.display = hasLoans ? 'block' : 'none';
       document.getElementById('rate-scenario-card').style.display = hasLoans ? 'block' : 'none';
+      renderLongevity(scenario ?? baseline, retireYear, pensionYear);
       renderPrepaySummary(baseline, scenario, prepayYear);
       renderRateScenario(loans, years, scenarioB, rateDelta, startY);
       renderMatrix(years, hasLoans, hasPnlData);
       drawChart(baseline, scenario, scenarioB, hasLoans, rateDelta);
+    }
+
+    // 資産寿命 (資産が尽きる年)
+    function renderLongevity(years, retireYear, pensionYear) {
+      const el = document.getElementById('longevity-summary');
+      if (!years.length) { el.style.display = 'none'; return; }
+
+      const depleted = years.find(d => d.endA <= 0);
+      const last = years[years.length - 1];
+      const ageAt = (y) => {
+        if (!membersWithBirth.length) return '';
+        return `(${membersWithBirth.map(m => `${m.name} ${y - m.birth_year}歳`).join(' / ')})`;
+      };
+      // 取り崩し率の上限に当たった年があるか
+      const capped = years.filter(d => d.withdrawalCapped);
+
+      el.style.display = 'block';
+      el.innerHTML = `
+        <div style="display:grid; gap:0.5rem;">
+          <div style="display:flex; justify-content:space-between; gap:0.5rem; flex-wrap:wrap;">
+            <span style="color:var(--text-muted);">資産寿命</span>
+            ${depleted
+              ? `<strong class="card-sub down" style="font-size:1rem;">${depleted.y}年に資産が尽きます ${ageAt(depleted.y)}</strong>`
+              : `<strong class="card-sub up" style="font-size:1rem;">${last.y}年まで資産は尽きません ${ageAt(last.y)}</strong>`}
+          </div>
+          <div style="display:flex; justify-content:space-between; gap:0.5rem; flex-wrap:wrap;">
+            <span style="color:var(--text-muted);">${last.y}年時点の資産</span>
+            <span style="font-variant-numeric:tabular-nums; ${last.endA < 0 ? 'color:var(--danger);' : ''}">${formatYen(last.endA)}</span>
+          </div>
+          ${retireYear != null ? `
+          <div style="display:flex; justify-content:space-between; gap:0.5rem; flex-wrap:wrap;">
+            <span style="color:var(--text-muted);">退職時(${retireYear}年)の資産</span>
+            <span style="font-variant-numeric:tabular-nums;">${formatYen(years.find(d => d.y === retireYear)?.endA ?? 0)}</span>
+          </div>` : ''}
+          ${capped.length ? `
+          <div style="font-size:0.82rem; color:var(--warning);">
+            ⚠️ ${capped[0].y}年以降、取り崩し率の上限では生活費を賄えず現預金がマイナスになります(${capped.length}年分)。
+          </div>` : ''}
+        </div>`;
     }
 
     // 金利A/B の比較表
@@ -805,6 +948,9 @@
       const rows = [];
       rows.push(`<tr><th class="row-head">${ageLabel}</th>${years.map(d => `<td>${d.age}</td>`).join('')}</tr>`);
       rows.push(`<tr class="section-gap"><th class="row-head">収入</th>${years.map(d => `<td>${man(d.inc)}</td>`).join('')}</tr>`);
+      if (years.some(d => (d.lumpSum ?? 0) > 0)) {
+        rows.push(`<tr><th class="row-head" style="padding-left:1.2rem;">└ 退職金</th>${years.map(d => `<td class="pos">${(d.lumpSum ?? 0) > 0 ? '+' + man(d.lumpSum) : '—'}</td>`).join('')}</tr>`);
+      }
       rows.push(`<tr><th class="row-head">支出</th>${years.map(d => `<td>${man(d.exp)}</td>`).join('')}</tr>`);
       if (hasLoans) {
         rows.push(`<tr><th class="row-head">ローン返済</th>${years.map(d => `<td>${d.loanPay > 0 ? '-' + man(d.loanPay) : '—'}</td>`).join('')}</tr>`);
@@ -817,6 +963,9 @@
         rows.push(`<tr><th class="row-head">積立</th>${years.map(d => `<td>${d.contribution > 0 ? '+' + man(d.contribution) : '—'}</td>`).join('')}</tr>`);
       }
       rows.push(`<tr><th class="row-head">運用益</th>${years.map(d => `<td>+${man(d.growth)}</td>`).join('')}</tr>`);
+      if (years.some(d => (d.withdrawal ?? 0) > 0)) {
+        rows.push(`<tr><th class="row-head">取り崩し</th>${years.map(d => `<td${(d.withdrawal ?? 0) > 0 ? ' class="neg"' : ''}>${(d.withdrawal ?? 0) > 0 ? '-' + man(d.withdrawal) : '—'}</td>`).join('')}</tr>`);
+      }
       rows.push(`<tr class="section-gap"><th class="row-head">現預金</th>${years.map(d => `<td${cls(d.cash)}>${man(d.cash)}</td>`).join('')}</tr>`);
       rows.push(`<tr><th class="row-head">運用資産</th>${years.map(d => `<td>${man(d.invest)}</td>`).join('')}</tr>`);
       if (hasPnlData) {
@@ -910,8 +1059,40 @@
 
     // 前提の変更で即再計算
     ['lp-start','lp-end','lp-rate','lp-start-cash','lp-start-inv','lp-base-income','lp-base-expense',
-     'lp-contrib','lp-contrib-end','lp-prepay-year','lp-prepay-ratio','lp-rate-delta']
+     'lp-contrib','lp-contrib-end','lp-prepay-year','lp-prepay-ratio','lp-rate-delta',
+     'lp-inflation','lp-retire-year','lp-retire-lump','lp-pension-year','lp-pension-annual','lp-withdrawal']
       .forEach(id => document.getElementById(id).addEventListener('input', recompute));
+
+    // インフレ率の効果を注記に出す (20年後の支出がいくら相当になるか)
+    function updateInflationHelp() {
+      const r = (parseFloat(document.getElementById('lp-inflation').value) || 0) / 100;
+      const exp = toInt(document.getElementById('lp-base-expense').value) ?? 0;
+      const help = document.getElementById('lp-inflation-help');
+      if (r > 0 && exp > 0) {
+        const after20 = Math.round(exp * Math.pow(1 + r, 20));
+        help.textContent = `20年後には同じ生活で ${formatYen(after20)} 相当になります`;
+      } else {
+        help.textContent = '支出が毎年この率で増える想定';
+      }
+    }
+    ['lp-inflation','lp-base-expense'].forEach(id =>
+      document.getElementById(id).addEventListener('input', updateInflationHelp));
+    updateInflationHelp();
+
+    // 退職年・年金開始年に年齢を注記
+    function updateAgeHelp(inputId, helpId, label) {
+      const y = toInt(document.getElementById(inputId).value);
+      const help = document.getElementById(helpId);
+      if (y != null && membersWithBirth.length) {
+        help.textContent = membersWithBirth.map(m => `${m.name} ${y - m.birth_year}歳`).join(' / ');
+      } else {
+        help.textContent = label;
+      }
+    }
+    document.getElementById('lp-retire-year').addEventListener('input',
+      () => updateAgeHelp('lp-retire-year', 'lp-retire-help', 'この年以降、年間収入は0になります'));
+    document.getElementById('lp-pension-year').addEventListener('input',
+      () => updateAgeHelp('lp-pension-year', 'lp-pension-help', '65歳になる年など'));
 
     // 一括返済年を入れたら「何年後」を注記に出す
     document.getElementById('lp-prepay-year').addEventListener('input', () => {
@@ -964,6 +1145,15 @@
           prepay_cash_ratio: parseFloat(document.getElementById('lp-prepay-ratio').value) || 0,
           rate_scenario_delta: (() => {
             const v = document.getElementById('lp-rate-delta').value.trim();
+            return v === '' ? null : (parseFloat(v) || 0);
+          })(),
+          inflation_rate: parseFloat(document.getElementById('lp-inflation').value) || 0,
+          retirement_year: toInt(document.getElementById('lp-retire-year').value),
+          retirement_lump_sum: toInt(document.getElementById('lp-retire-lump').value),
+          pension_start_year: toInt(document.getElementById('lp-pension-year').value),
+          pension_annual: toInt(document.getElementById('lp-pension-annual').value),
+          withdrawal_rate: (() => {
+            const v = document.getElementById('lp-withdrawal').value.trim();
             return v === '' ? null : (parseFloat(v) || 0);
           })(),
         });
