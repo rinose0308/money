@@ -146,7 +146,7 @@
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-withdrawal">取り崩し率 (%)</label>
             <input type="number" id="lp-withdrawal" class="form-input" step="0.1" inputmode="decimal" placeholder="例: 4 (空欄=制限なし)">
-            <p class="form-help">退職後、年初資産のこの割合を上限に取り崩す(4%ルールなど)</p>
+            <p class="form-help">退職年以降、不足分を運用資産から取り崩します。年初の運用資産のこの割合が上限(4%ルールなど)。空欄なら上限なし</p>
           </div>
         </div>
         <div id="longevity-summary" style="display:none; margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px dashed var(--border); font-size: 0.9rem;"></div>
@@ -697,10 +697,12 @@
           // 積立は現預金とは別枠(給与から直接など)なので現預金からは引かない
           cash = cash + cf;
 
-          // 赤字で現預金が尽きたら運用資産を取り崩す (退職後の生活費を賄うイメージ)
+          // 取り崩しは退職年以降のみ行う (退職前の赤字は現預金マイナスとして可視化する)
+          // 退職年が未設定の場合は年を問わず取り崩す
+          const canWithdraw = (retireYear == null) || (y >= retireYear);
           // 取り崩し率の指定があれば、その年に取り崩せる額に上限をかける
           let withdrawal = 0, withdrawalCapped = false;
-          if (cash < 0 && invest > 0) {
+          if (cash < 0 && invest > 0 && canWithdraw) {
             const need = -cash;
             let allowed = need;
             if (withdrawalRate != null) {
@@ -773,6 +775,11 @@
       };
       // 取り崩し率の上限に当たった年があるか
       const capped = years.filter(d => d.withdrawalCapped);
+      // 退職前に現預金がマイナスになる年 (取り崩しは退職後のみなので警告する)
+      const preRetireShort = (retireYear != null)
+        ? years.find(d => d.y < retireYear && d.cash < 0) : null;
+      // 取り崩しが始まる年
+      const firstWithdrawal = years.find(d => (d.withdrawal ?? 0) > 0);
 
       el.style.display = 'block';
       el.innerHTML = `
@@ -791,6 +798,15 @@
           <div style="display:flex; justify-content:space-between; gap:0.5rem; flex-wrap:wrap;">
             <span style="color:var(--text-muted);">退職時(${retireYear}年)の資産</span>
             <span style="font-variant-numeric:tabular-nums;">${formatYen(years.find(d => d.y === retireYear)?.endA ?? 0)}</span>
+          </div>` : ''}
+          ${firstWithdrawal ? `
+          <div style="display:flex; justify-content:space-between; gap:0.5rem; flex-wrap:wrap;">
+            <span style="color:var(--text-muted);">取り崩し開始</span>
+            <span>${firstWithdrawal.y}年から (年 ${formatYenShort(firstWithdrawal.withdrawal)})</span>
+          </div>` : ''}
+          ${preRetireShort ? `
+          <div style="font-size:0.82rem; color:var(--danger);">
+            ⚠️ ${preRetireShort.y}年(退職前)に現預金がマイナスになります。取り崩しは退職年以降のみのため、それまでは収支の見直しが必要です。
           </div>` : ''}
           ${capped.length ? `
           <div style="font-size:0.82rem; color:var(--warning);">
