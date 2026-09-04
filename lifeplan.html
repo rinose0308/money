@@ -26,6 +26,36 @@
         年間の収入・支出をざっくり決めるだけで、将来の資産を試算します。退職や大きな出費など特別な年だけ、下の「特別な年」に追加してください。
       </p>
 
+      <!-- 結果サマリー (前提を変えると即更新) -->
+      <div class="card summary-strip" id="lp-summary" style="margin-bottom: 1rem;">
+        <div class="grid cols-4">
+          <div>
+            <p class="card-title" id="sum-final-label">最終年の純資産</p>
+            <p class="card-value" id="sum-final">—</p>
+            <p class="card-sub" id="sum-final-sub"></p>
+          </div>
+          <div>
+            <p class="card-title">資産寿命</p>
+            <p class="card-value" id="sum-life">—</p>
+            <p class="card-sub" id="sum-life-sub"></p>
+          </div>
+          <div>
+            <p class="card-title" id="sum-retire-label">退職時の資産</p>
+            <p class="card-value" id="sum-retire">—</p>
+            <p class="card-sub" id="sum-retire-sub"></p>
+          </div>
+          <div>
+            <p class="card-title">目標達成</p>
+            <p class="card-value" id="sum-target">—</p>
+            <p class="card-sub" id="sum-target-sub"></p>
+          </div>
+        </div>
+        <div style="margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px dashed var(--border); font-size: 0.8rem; color: var(--text-muted); display:flex; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
+          <span>下の前提を変えると、この結果とグラフがその場で更新されます。</span>
+          <a href="#lp-chart-section">📈 グラフ・年別表へ ↓</a>
+        </div>
+      </div>
+
       <!-- 前提 -->
       <div class="card" style="margin-bottom: 1rem;">
         <h3 style="margin: 0 0 0.75rem; font-size: 1rem;">前提</h3>
@@ -49,19 +79,19 @@
             <p class="form-help" id="lp-start-inv-help"></p>
           </div>
           <div class="form-group" style="margin:0;">
-            <label class="form-label" for="lp-rate">想定利回り (%)</label>
-            <input type="number" id="lp-rate" class="form-input" step="0.1" inputmode="decimal" placeholder="例: 3">
-            <p class="form-help">運用資産が毎年何%増える想定か(現預金には掛かりません)</p>
-          </div>
-          <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-base-income">年間収入 (円/年)</label>
-            <input type="number" id="lp-base-income" class="form-input" inputmode="numeric">
-            <p class="form-help" id="lp-income-help">毎年の収入の目安</p>
+            <input type="number" id="lp-base-income" class="form-input yen-input" inputmode="numeric">
+            <p class="form-help" id="lp-income-help">毎年の収入の目安(手取り)</p>
           </div>
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-base-expense">年間支出 (円/年)</label>
-            <input type="number" id="lp-base-expense" class="form-input" inputmode="numeric">
-            <p class="form-help">毎年の支出の目安</p>
+            <input type="number" id="lp-base-expense" class="form-input yen-input" inputmode="numeric">
+            <p class="form-help">毎年の支出の目安(ローン返済・積立は含めない)</p>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-rate">想定利回り (%)</label>
+            <input type="number" id="lp-rate" class="form-input" step="0.1" inputmode="decimal" placeholder="例: 3">
+            <p class="form-help">運用資産が毎年何%増える想定か(現預金には掛かりません)</p>
           </div>
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-inflation">想定インフレ率 (%)</label>
@@ -130,7 +160,7 @@
           </div>
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-retire-lump">退職金 (円)</label>
-            <input type="number" id="lp-retire-lump" class="form-input" inputmode="numeric" placeholder="例: 20000000">
+            <input type="number" id="lp-retire-lump" class="form-input yen-input" inputmode="numeric" placeholder="例: 20000000">
             <p class="form-help">退職年に現預金へ加算されます</p>
           </div>
           <div class="form-group" style="margin:0;">
@@ -140,7 +170,7 @@
           </div>
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-pension-annual">年金の年額 (円/年)</label>
-            <input type="number" id="lp-pension-annual" class="form-input" inputmode="numeric" placeholder="例: 2800000">
+            <input type="number" id="lp-pension-annual" class="form-input yen-input" inputmode="numeric" placeholder="例: 2800000">
             <p class="form-help">世帯合計。受給開始年から毎年の収入になります</p>
           </div>
           <div class="form-group" style="margin:0;">
@@ -225,7 +255,7 @@
       </div>
 
       <!-- グラフ -->
-      <h2 class="section-title">資産予測</h2>
+      <h2 class="section-title" id="lp-chart-section">資産予測</h2>
       <div class="card" style="margin-bottom: 1rem;">
         <div class="chart-container" style="height: 300px;">
           <canvas id="lp-chart"></canvas>
@@ -286,7 +316,7 @@
         ? `<div class="empty-state" style="max-width:520px;margin:0 auto;">
              <h3>データベースの準備が必要です</h3>
              <p style="margin:0.5rem 0;">ライフプラン用のテーブルがまだ作成されていません。<br>
-             Supabase の SQL Editor で <code>0006</code>〜<code>0009</code> のマイグレーション(<code>supabase/migrations/</code>)を実行してください。</p>
+             Supabase の SQL Editor で <code>0006</code>〜<code>0011</code> のマイグレーション(<code>supabase/migrations/</code>)を実行してください。</p>
              <button class="btn btn-primary btn-sm" onclick="location.reload()">実行したら再読み込み</button>
            </div>`
         : `<div class="empty-state" style="max-width:520px;margin:0 auto;">
@@ -384,6 +414,7 @@
     document.getElementById('lp-pension-year').value = S.pension_start_year ?? '';
     document.getElementById('lp-pension-annual').value = S.pension_annual ?? '';
     document.getElementById('lp-withdrawal').value = S.withdrawal_rate ?? '';
+    attachYenHints();
     if (incomeIsPlaceholder) {
       document.getElementById('lp-income-help').textContent = '⚠️ 収入の実績がないため、仮に支出と同額を入れています。実際の年収を入力してください。';
       document.getElementById('lp-income-help').style.color = 'var(--warning)';
@@ -452,8 +483,6 @@
       const has = loansTbody.children.length > 0;
       loansWrap.style.display = has ? 'block' : 'none';
       loansEmpty.style.display = has ? 'none' : 'block';
-      // ローン列の表示切替
-      document.querySelectorAll('.loan-col').forEach(el => el.style.display = has ? '' : 'none');
     }
 
     // 年間返済額(元利均等・年次)。残り年数で現在残高を返済しきる額
@@ -543,6 +572,28 @@
     function ageCell(year) {
       if (!membersWithBirth.length) return '—';
       return membersWithBirth.map(m => `${year - m.birth_year}`).join(' / ');
+    }
+    // 「(りょちょ 62歳 / まちょ 60歳)」形式。生年が未登録なら空文字 (エスケープなし・textContent用)
+    function ageStr(year) {
+      if (!membersWithBirth.length) return '';
+      return `(${membersWithBirth.map(m => `${m.name} ${year - m.birth_year}歳`).join(' / ')})`;
+    }
+
+    // 金額入力のラベル横に「= ¥1,600万」の読み替えを出す (.yen-input が対象)
+    function attachYenHints() {
+      document.querySelectorAll('input.yen-input').forEach(inp => {
+        const label = document.querySelector(`label[for="${inp.id}"]`);
+        if (!label) return;
+        const hint = document.createElement('span');
+        hint.className = 'yen-hint';
+        label.appendChild(hint);
+        const update = () => {
+          const v = toInt(inp.value);
+          hint.textContent = (v != null && v !== 0) ? `= ${formatYenShort(v)}` : '';
+        };
+        inp.addEventListener('input', update);
+        update();
+      });
     }
 
     let chart = null;
@@ -725,7 +776,7 @@
             y, age: ageCell(y), inc, exp, loanPay, loanInterest, cf, growth,
             contribution: contributedThisYear,
             prepayAmount, prepayFromCash, prepayFromInvest,
-            lumpSum, withdrawal, withdrawalCapped, retired, pension: (!retired || ev.income != null) ? 0 : (gettingPension ? pensionAnnual : 0),
+            lumpSum, withdrawal, withdrawalCapped, retired,
             cash, invest, investPnl, investPrincipal: invest - investPnl,
             endA, loanBal, netWorth: endA - loanBal, note: ev.note ?? '',
           });
@@ -752,14 +803,76 @@
       // 表とグラフは「早期返済あり」を主役にする(未設定ならベースライン)
       const years = scenario ?? baseline;
 
+      // グラフの縦線と年別表の見出しに出すイベント (退職 / 年金開始 / 一括返済)
+      const milestones = [];
+      if (retireYear != null && retireYear >= startY && retireYear <= endY) milestones.push({ year: retireYear, label: '退職', color: '#dc2626' });
+      if (pensionYear != null && pensionYear >= startY && pensionYear <= endY) milestones.push({ year: pensionYear, label: '年金', color: '#16a34a' });
+      if (doPrepay) milestones.push({ year: prepayYear, label: '一括返済', color: '#f59e0b' });
+      const marks = new Map();
+      for (const m of milestones) marks.set(m.year, marks.has(m.year) ? `${marks.get(m.year)}/${m.label}` : m.label);
+
       refreshLoansVisibility();
       document.getElementById('prepay-card').style.display = hasLoans ? 'block' : 'none';
       document.getElementById('rate-scenario-card').style.display = hasLoans ? 'block' : 'none';
-      renderLongevity(scenario ?? baseline, retireYear, pensionYear);
+      renderSummary(years, retireYear);
+      renderLongevity(years, retireYear, pensionYear);
       renderPrepaySummary(baseline, scenario, prepayYear);
       renderRateScenario(loans, years, scenarioB, rateDelta, startY);
-      renderMatrix(years, hasLoans, hasPnlData);
-      drawChart(baseline, scenario, scenarioB, hasLoans, rateDelta);
+      renderMatrix(years, hasLoans, hasPnlData, marks);
+      drawChart(baseline, scenario, scenarioB, hasLoans, rateDelta, milestones);
+    }
+
+    // ページ上部の結果サマリー
+    function renderSummary(years, retireYear) {
+      if (!years.length) return;
+      const last = years[years.length - 1];
+      const set = (id, text) => { document.getElementById(id).textContent = text; };
+      const color = (id, c) => { document.getElementById(id).style.color = c || ''; };
+
+      set('sum-final-label', `${last.y}年の純資産`);
+      set('sum-final', formatYenShort(last.netWorth));
+      set('sum-final-sub', `現預金 ${formatYenShort(last.cash)} / 運用 ${formatYenShort(last.invest)}`);
+      color('sum-final', last.netWorth < 0 ? 'var(--danger)' : '');
+
+      const depleted = years.find(d => d.endA <= 0);
+      if (depleted) {
+        set('sum-life', `${depleted.y}年`);
+        set('sum-life-sub', `資産が尽きます ${ageStr(depleted.y)}`);
+        color('sum-life', 'var(--danger)');
+      } else {
+        set('sum-life', `${last.y}年まで`);
+        set('sum-life-sub', `期間内は尽きません ${ageStr(last.y)}`);
+        color('sum-life', 'var(--success)');
+      }
+
+      const r = retireYear != null ? years.find(d => d.y === retireYear) : null;
+      if (r) {
+        set('sum-retire-label', `退職時(${retireYear}年)の資産`);
+        set('sum-retire', formatYenShort(r.endA));
+        set('sum-retire-sub', ageStr(retireYear) || '退職年の年末時点');
+      } else {
+        set('sum-retire-label', '退職時の資産');
+        set('sum-retire', '—');
+        set('sum-retire-sub', '退職年が未設定');
+      }
+      color('sum-retire', '');
+
+      if (TARGET != null && TARGET > 0) {
+        const hit = years.find(d => d.netWorth >= TARGET);
+        if (hit) {
+          set('sum-target', `${hit.y}年`);
+          set('sum-target-sub', `目標 ${formatYenShort(TARGET)} に到達 ${ageStr(hit.y)}`);
+          color('sum-target', 'var(--success)');
+        } else {
+          set('sum-target', '未達');
+          set('sum-target-sub', `期間内に ${formatYenShort(TARGET)} に届きません`);
+          color('sum-target', 'var(--danger)');
+        }
+      } else {
+        set('sum-target', '—');
+        set('sum-target-sub', '目標額は設定画面から登録');
+        color('sum-target', '');
+      }
     }
 
     // 資産寿命 (資産が尽きる年)
@@ -769,10 +882,7 @@
 
       const depleted = years.find(d => d.endA <= 0);
       const last = years[years.length - 1];
-      const ageAt = (y) => {
-        if (!membersWithBirth.length) return '';
-        return `(${membersWithBirth.map(m => `${m.name} ${y - m.birth_year}歳`).join(' / ')})`;
-      };
+      const ageAt = (y) => escapeHtml(ageStr(y));
       // 取り崩し率の上限に当たった年があるか
       const capped = years.filter(d => d.withdrawalCapped);
       // 退職前に現預金がマイナスになる年 (取り崩しは退職後のみなので警告する)
@@ -941,7 +1051,7 @@
     }
 
     // 年を横に並べたキャッシュフロー表を描画
-    function renderMatrix(years, hasLoans, hasPnlData) {
+    function renderMatrix(years, hasLoans, hasPnlData, marks = new Map()) {
       const thead = document.getElementById('lp-thead');
       const tb = document.getElementById('lp-tbody');
       if (!years.length) { thead.innerHTML = ''; tb.innerHTML = ''; return; }
@@ -955,7 +1065,11 @@
       };
       const cls = (v) => v < 0 ? ' class="neg"' : '';
 
-      thead.innerHTML = `<tr><th class="row-head">年</th>${years.map(d => `<th>${d.y}</th>`).join('')}</tr>`;
+      // 退職・年金・一括返済の年は見出しにマークを付けて色を変える
+      thead.innerHTML = `<tr><th class="row-head">年</th>${years.map(d => {
+        const mk = marks.get(d.y);
+        return `<th${mk ? ' class="milestone"' : ''}>${d.y}${mk ? `<span class="mark">${escapeHtml(mk)}</span>` : ''}</th>`;
+      }).join('')}</tr>`;
 
       const ageLabel = membersWithBirth.length
         ? `年齢<br><span style="font-weight:400;font-size:0.7rem;">${membersWithBirth.map(m => escapeHtml(m.name)).join('/')}</span>`
@@ -998,7 +1112,32 @@
       tb.innerHTML = rows.join('');
     }
 
-    function drawChart(baseline, scenario, scenarioB, hasLoans, rateDelta) {
+    // グラフに「退職」「年金」などの縦の点線を引く小さなプラグイン
+    const milestonePlugin = {
+      id: 'milestones',
+      afterDatasetsDraw(chart, _args, opts) {
+        const items = opts?.items ?? [];
+        if (!items.length) return;
+        const { ctx, chartArea: { top, bottom }, scales: { x } } = chart;
+        const labels = chart.data.labels;
+        ctx.save();
+        ctx.font = '600 10px sans-serif';
+        ctx.textAlign = 'left';
+        // 年順に並べて段をずらす (近い年のラベルがスマホ幅で重ならないように)
+        [...items].sort((a, b) => a.year - b.year).forEach((it, i) => {
+          const idx = labels.indexOf(String(it.year));
+          if (idx < 0) return;
+          const px = x.getPixelForValue(idx);
+          ctx.strokeStyle = it.color; ctx.fillStyle = it.color;
+          ctx.setLineDash([4, 3]); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(px, top); ctx.lineTo(px, bottom); ctx.stroke();
+          ctx.fillText(it.label, px + 4, top + 11 + (i % 3) * 12);
+        });
+        ctx.restore();
+      },
+    };
+
+    function drawChart(baseline, scenario, scenarioB, hasLoans, rateDelta, milestones = []) {
       const ctx = document.getElementById('lp-chart').getContext('2d');
       const labels = baseline.map(d => String(d.y));
       const datasets = [];
@@ -1061,12 +1200,14 @@
       chart = new Chart(ctx, {
         type: 'line',
         data: { labels, datasets },
+        plugins: [milestonePlugin],
         options: {
           responsive: true, maintainAspectRatio: false,
           interaction: { mode: 'index', intersect: false },
           plugins: {
             legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
             tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${formatYen(c.parsed.y)}` } },
+            milestones: { items: milestones },
           },
           scales: { y: { ticks: { callback: (v) => formatYenShort(v) } } },
         },

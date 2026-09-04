@@ -10,6 +10,8 @@
   --success: #16a34a;
   --danger: #dc2626;
   --warning: #f59e0b;
+  --primary-soft: #eff6ff;
+  --nav-h: 53px;   /* nav.js が実測値で上書きする */
 }
 
 * { box-sizing: border-box; }
@@ -57,17 +59,47 @@ a:hover { text-decoration: underline; }
 }
 .app-nav .nav-links a:hover {
   background: var(--bg);
+  color: var(--text);
   text-decoration: none;
 }
 .app-nav .nav-links a.active {
   color: var(--primary);
   font-weight: 600;
-  background: #eff6ff;
+  background: var(--primary-soft);
 }
 
-@media (max-width: 640px) {
-  .app-nav .nav-links a { font-size: 0.8rem; padding: 0.3rem 0.5rem; }
+/* スマホ: 下部タブバー (767px以下で表示。上部のリンクは隠す) */
+.tab-bar { display: none; }
+@media (max-width: 767px) {
   .app-nav .brand { font-size: 1rem; }
+  .app-nav .nav-links a { display: none; }
+  .tab-bar {
+    display: flex;
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    padding: 0.3rem 0 calc(0.3rem + env(safe-area-inset-bottom));
+    z-index: 100;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
+  }
+  .tab-bar a {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-height: 48px;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+  .tab-bar a .tab-icon { font-size: 1.3rem; line-height: 1; }
+  .tab-bar a.active { color: var(--primary); font-weight: 600; }
+  .tab-bar a:hover { text-decoration: none; }
+  /* タブバーの分だけ下に余白 (nav.js が body に付ける) */
+  body.has-tabbar { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 }
 
 /* レイアウト */
@@ -100,6 +132,8 @@ a:hover { text-decoration: underline; }
   font-weight: 700;
   margin: 0;
   letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 .card-sub {
   font-size: 0.85rem;
@@ -114,14 +148,21 @@ a:hover { text-decoration: underline; }
   display: grid;
   gap: 1rem;
 }
-.grid.cols-4 { grid-template-columns: repeat(1, 1fr); }
+/* 指標カード(cols-4)はスマホでも 2×2 に。縦に4枚並ぶより一覧性が高い */
+.grid.cols-4 { grid-template-columns: repeat(2, 1fr); }
 .grid.cols-2 { grid-template-columns: repeat(1, 1fr); }
 @media (min-width: 640px)  {
-  .grid.cols-4 { grid-template-columns: repeat(2, 1fr); }
   .grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
 }
 @media (min-width: 1024px) {
   .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+}
+@media (max-width: 639px) {
+  .grid { gap: 0.6rem; }
+  .card { padding: 0.9rem 0.85rem; }
+  /* 2列に収まるよう金額を少し小さく (インラインの font-size より優先) */
+  .card-value { font-size: 1.25rem !important; }
+  .card-title { font-size: 0.78rem; }
 }
 
 /* フォーム */
@@ -247,9 +288,12 @@ input[type="number"] {
 
 /* セクション */
 .section-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin: 1.5rem 0 0.75rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 1.75rem 0 0.75rem;
+  padding-left: 0.6rem;
+  border-left: 3px solid var(--primary);
+  line-height: 1.3;
 }
 
 .chart-container {
@@ -275,8 +319,7 @@ input[type="number"] {
   color: var(--text-muted);
   background: var(--bg);
   font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  white-space: nowrap;
 }
 .table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .table tbody tr:hover { background: #fafbfc; }
@@ -434,7 +477,7 @@ input[type="number"] {
 /* sticky ツールバー (月次入力など) */
 .sticky-toolbar {
   position: sticky;
-  top: 53px;  /* ナビゲーションの真下 */
+  top: var(--nav-h, 53px);  /* ナビゲーションの真下 (実高さは nav.js が設定) */
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
   padding: 0.75rem 1rem;
@@ -604,3 +647,35 @@ input[type="number"] {
   0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); }
   50%      { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
 }
+
+/* 金額入力の横に出す短縮表示 (例: = ¥1,600万) */
+.yen-hint {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-left: 0.4rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ライフプラン上部の結果サマリー */
+.summary-strip .card-value { font-size: 1.3rem; }
+.summary-strip .card-title { margin-bottom: 0.2rem; }
+.summary-strip .card-sub { font-size: 0.78rem; }
+
+/* 年別表の見出しにイベントマーク (退職 / 年金 / 一括返済) */
+.matrix-table thead th.milestone { background: var(--primary-soft); }
+.matrix-table thead th .mark {
+  display: block;
+  font-size: 0.62rem;
+  color: var(--primary);
+  font-weight: 700;
+  line-height: 1.1;
+  margin-top: 1px;
+}
+
+/* キーボード操作時のフォーカスを見やすく */
+.btn:focus-visible, .tab-bar a:focus-visible, .app-nav .nav-links a:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.form-input:hover, .form-select:hover { border-color: #cbd5e1; }

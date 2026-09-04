@@ -23,22 +23,35 @@ export async function getUser() {
 }
 
 // 自分のプロファイル取得 (なければ null)
-export async function getMyProfile() {
-  const user = await getUser();
-  if (!user) return null;
-
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, display_name, household_id, households(id, name, invite_code, target_total_amount)')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  if (error) throw error;
-  return data;
+// ページ内では結果をキャッシュする。api.js の保存系が毎回呼ぶため、
+// キャッシュしないと保存のたびに session + profiles の2往復が余分に走る。
+let _profilePromise = null;
+export async function getMyProfile({ force = false } = {}) {
+  if (!force && _profilePromise) return _profilePromise;
+  _profilePromise = (async () => {
+    const user = await getUser();
+    if (!user) return null;
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, display_name, household_id, households(id, name, invite_code, target_total_amount)')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  })();
+  try {
+    const p = await _profilePromise;
+    if (!p) _profilePromise = null;   // 未作成なら次回また取りに行く (オンボーディング直後など)
+    return p;
+  } catch (err) {
+    _profilePromise = null;
+    throw err;
+  }
 }
 
 // ログアウト
 export async function signOut() {
+  _profilePromise = null;
   await supabase.auth.signOut();
   window.location.href = '/index.html';
 }

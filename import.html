@@ -30,15 +30,9 @@
         </div>
       </div>
 
-      <h2 style="margin: 0 0 0.5rem; font-size: 1.1rem;">取り込み</h2>
-      <div class="tabs">
-        <button class="tab-btn active" data-tab="legacy">過去データ (我が家マネーCSV)</button>
-        <button class="tab-btn" data-tab="csv">支出CSV</button>
-        <button class="tab-btn" data-tab="manual">手入力</button>
-      </div>
+      <h2 style="margin: 0 0 0.5rem; font-size: 1.1rem;">📤 過去データの取り込み</h2>
 
-      <!-- タブ1: 過去CSV -->
-      <div class="tab-pane" id="tab-legacy">
+      <div id="tab-legacy">
         <div class="card">
           <h2 style="margin: 0 0 0.5rem; font-size: 1.1rem;">我が家マネー - シート1.csv の取り込み</h2>
           <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0 0 1rem;">
@@ -119,21 +113,6 @@
         </div>
       </div>
 
-      <!-- タブ2: 支出CSV (Phase 4) -->
-      <div class="tab-pane" id="tab-csv" style="display:none;">
-        <div class="card empty-state">
-          <h3>Phase 4 で実装予定</h3>
-          <p>マネーフォワード/楽天カード等のCSV取り込みはPhase 4で実装します。</p>
-        </div>
-      </div>
-
-      <!-- タブ3: 手入力 (Phase 4) -->
-      <div class="tab-pane" id="tab-manual" style="display:none;">
-        <div class="card empty-state">
-          <h3>Phase 4 で実装予定</h3>
-          <p>単発の支出/収入入力はPhase 4で実装します。</p>
-        </div>
-      </div>
     </div>
   </main>
 
@@ -254,16 +233,6 @@
         btn.disabled = false; btn.textContent = '支出履歴 (CSV)';
       }
     }));
-
-    // タブ切替
-    document.querySelectorAll('.tab-btn').forEach(b => {
-      b.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('active'));
-        b.classList.add('active');
-        document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
-        document.getElementById(`tab-${b.dataset.tab}`).style.display = 'block';
-      });
-    });
 
     // ============ Drag & Drop / File input ============
     const dropzone = document.getElementById('dropzone');

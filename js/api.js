@@ -710,21 +710,3 @@ export async function getAssetTrend({ fromDate = null } = {}) {
 
   return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
-
-// 最新の総資産・前月比
-export async function getLatestAssetSummary() {
-  const trend = await getAssetTrend();
-  if (trend.length === 0) return { total: 0, prevTotal: null, diff: null, latestDate: null, byType: {} };
-
-  const latest = trend[trend.length - 1];
-  const prev = trend.length >= 2 ? trend[trend.length - 2] : null;
-
-  return {
-    total: latest.total,
-    prevTotal: prev?.total ?? null,
-    diff: prev ? latest.total - prev.total : null,
-    diffPct: prev ? ((latest.total - prev.total) / prev.total) * 100 : null,
-    latestDate: latest.date,
-    byType: latest.byType,
-  };
-}

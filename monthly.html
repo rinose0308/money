@@ -664,10 +664,10 @@
           }
         });
 
-        for (const [accountId, rows] of perAccount) {
-          await replaceAccountMonthSnapshots({ account_id: accountId, year: y, month: m, rows });
-          assetAccountsSaved++;
-        }
+        // 口座ごとの置換は互いに独立なので並列に投げる (直列だと口座数×2往復ぶん待つ)
+        await Promise.all(Array.from(perAccount, ([accountId, rows]) =>
+          replaceAccountMonthSnapshots({ account_id: accountId, year: y, month: m, rows })));
+        assetAccountsSaved = perAccount.size;
 
         // 2. 収入
         const incomeRows = [];

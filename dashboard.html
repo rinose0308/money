@@ -713,7 +713,8 @@
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { position: 'right', labels: { boxWidth: 12, padding: 8, font: { size: 12 } } },
+            // スマホでは右に凡例を置くと円が潰れるので下に
+            legend: { position: window.innerWidth < 640 ? 'bottom' : 'right', labels: { boxWidth: 12, padding: 8, font: { size: 12 } } },
             tooltip: {
               callbacks: {
                 label: (ctx) => {
