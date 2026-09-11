@@ -3,7 +3,9 @@
 // 通貨フォーマッタ
 export function formatYen(n) {
   if (n == null || isNaN(n)) return '¥0';
-  return '¥' + Math.round(Number(n)).toLocaleString('ja-JP');
+  const v = Math.round(Number(n));
+  // 符号は ¥ の前に (formatYenShort と揃える: "¥-1,234" ではなく "-¥1,234")
+  return (v < 0 ? '-¥' : '¥') + Math.abs(v).toLocaleString('ja-JP');
 }
 
 // 短縮表記 (1.2億, 3,500万, 1.2万)

@@ -129,7 +129,7 @@
               <p class="card-value" id="pnl-principal" style="font-size: 1.4rem;">—</p>
             </div>
             <div>
-              <p class="card-title">含み益</p>
+              <p class="card-title" id="pnl-gain-title">含み益</p>
               <p class="card-value" id="pnl-gain" style="font-size: 1.4rem;">—</p>
               <p class="card-sub" id="pnl-gain-sub">—</p>
             </div>
@@ -440,6 +440,7 @@
       const gainEl = document.getElementById('pnl-gain');
       gainEl.textContent = formatYen(latest.pnl);
       gainEl.style.color = latest.pnl >= 0 ? 'var(--success)' : 'var(--danger)';
+      document.getElementById('pnl-gain-title').textContent = latest.pnl >= 0 ? '含み益' : '含み損';
       const ratio = latest.principal > 0 ? (latest.pnl / latest.principal) * 100 : 0;
       document.getElementById('pnl-gain-sub').textContent = `元本比 ${formatPercent(ratio)}`;
 
@@ -455,8 +456,10 @@
         diffSub.textContent = '前月データなし';
       }
 
-      // 直近36ヶ月を積み上げ(元本 + 含み益 = 評価額)
+      // 直近36ヶ月: 「元本」のブロックに「評価額」の線を重ね、その差を 緑=含み益 / 赤=含み損 で塗る。
+      // (積み上げ方式だと含み益がマイナスの月に別スタックへ落ちて、資産が暴落したように見えてしまう)
       const series = withPnl.slice(-36);
+      const GAIN = 'rgba(22,163,74,0.45)', LOSS = 'rgba(220,38,38,0.45)';
       const ctx = document.getElementById('pnl-chart').getContext('2d');
       new Chart(ctx, {
         type: 'line',
@@ -465,14 +468,16 @@
           datasets: [
             {
               label: '元本', data: series.map(t => t.principal),
-              borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.75)',
-              fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
+              borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.18)',
+              fill: 'origin', tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2,
               datalabels: { display: false },
             },
             {
-              label: '含み益', data: series.map(t => t.pnl),
-              borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,0.55)',
-              fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
+              label: '評価額', data: series.map(t => t.investTotal),
+              borderColor: '#334155', backgroundColor: 'transparent',
+              // 1つ前(元本)との間を塗る。上回れば緑、下回れば赤
+              fill: { target: '-1', above: GAIN, below: LOSS },
+              tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2,
               datalabels: { display: false },
             },
           ],
@@ -481,21 +486,36 @@
           responsive: true, maintainAspectRatio: false,
           interaction: { mode: 'index', intersect: false },
           plugins: {
-            legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
+            legend: {
+              position: 'bottom',
+              labels: {
+                boxWidth: 12, padding: 10,
+                // 塗り(含み益/含み損)はデータセットではないので凡例に手で足す
+                generateLabels: (chart) => Chart.defaults.plugins.legend.labels.generateLabels(chart).concat([
+                  { text: '含み益', fillStyle: GAIN, strokeStyle: GAIN, lineWidth: 0, hidden: false },
+                  { text: '含み損', fillStyle: LOSS, strokeStyle: LOSS, lineWidth: 0, hidden: false },
+                ]),
+              },
+              onClick: (e, item, legend) => {
+                if (item.datasetIndex == null) return;  // 手で足した項目はクリックしても何もしない
+                Chart.defaults.plugins.legend.onClick(e, item, legend);
+              },
+            },
             tooltip: {
               callbacks: {
                 label: (c) => `${c.dataset.label}: ${formatYen(c.parsed.y)}`,
                 footer: (items) => {
                   const i = items[0]?.dataIndex;
                   if (i == null) return '';
-                  return `評価額: ${formatYen(series[i].investTotal)}`;
+                  const d = series[i];
+                  const r = d.principal > 0 ? (d.pnl / d.principal) * 100 : 0;
+                  return `${d.pnl >= 0 ? '含み益' : '含み損'}: ${d.pnl >= 0 ? '+' : ''}${formatYen(d.pnl)} (元本比 ${formatPercent(r)})`;
                 },
               },
             },
           },
           scales: {
-            y: { stacked: true, ticks: { callback: (v) => formatYenShort(v) } },
-            x: { stacked: true },
+            y: { beginAtZero: true, ticks: { callback: (v) => formatYenShort(v) } },
           },
         },
       });

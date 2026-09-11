@@ -392,7 +392,7 @@
       const asOf = ACTUAL.date ? `${ACTUAL.date.slice(0, 7)}時点の実績` : '実績なし';
       document.getElementById('lp-start-cash-help').textContent = `${asOf}: ${formatYen(ACTUAL.cash)}`;
       document.getElementById('lp-start-inv-help').textContent = (ACTUAL.pnl ?? 0) !== 0
-        ? `${asOf}: ${formatYen(ACTUAL.investment)} (元本 ${formatYenShort(ACTUAL.principal)} + 含み益 ${formatYenShort(ACTUAL.pnl)})`
+        ? `${asOf}: ${formatYen(ACTUAL.investment)} (元本 ${formatYenShort(ACTUAL.principal)} ${ACTUAL.pnl >= 0 ? '+ 含み益' : '− 含み損'} ${formatYenShort(Math.abs(ACTUAL.pnl))})`
         : `${asOf}: ${formatYen(ACTUAL.investment)}`;
     }
 
@@ -649,7 +649,8 @@
       // ローンの状態は毎回コピーして使う (2シナリオ回すため元データを壊さない)
       function runProjection({ prepayYear = null, prepayRatio = 80, rateDelta = 0 } = {}) {
         let cash = startCash, invest = startInvest;
-        let investPnl = Math.max(0, Math.min(ACTUAL.pnl ?? 0, invest));
+        // 含み損(マイナス)もそのまま引き継ぐ。上限だけ運用資産まで(元本がマイナスにならないように)
+        let investPnl = Math.min(ACTUAL.pnl ?? 0, invest);
         // rateDelta を上乗せした金利で、年間返済額も再計算し直す
         const lns = loans.map(l => {
           const rate = Math.max(0, (l.interest_rate || 0) + rateDelta);
@@ -700,7 +701,7 @@
                 const pnlShare = invest > 0 ? investPnl / invest : 0;
                 const sell = Math.min(prepayFromInvest, invest);
                 invest -= sell;
-                investPnl = Math.max(0, Math.round(investPnl - sell * pnlShare));
+                investPnl = Math.round(investPnl - sell * pnlShare);   // 比率で減らす (含み損なら符号を保ったまま縮む)
                 // 運用資産が足りない場合は残りを現預金から (マイナスも許容して可視化)
                 if (sell < prepayFromInvest) cash -= (prepayFromInvest - sell);
               }
@@ -764,7 +765,7 @@
             if (sell > 0) {
               const pnlShare = invest > 0 ? investPnl / invest : 0;
               invest -= sell;
-              investPnl = Math.max(0, Math.round(investPnl - sell * pnlShare));
+              investPnl = Math.round(investPnl - sell * pnlShare);   // 比率で減らす (含み損なら符号を保ったまま縮む)
               cash += sell;
               withdrawal = sell;
             }
@@ -1100,7 +1101,7 @@
       rows.push(`<tr><th class="row-head">運用資産</th>${years.map(d => `<td>${man(d.invest)}</td>`).join('')}</tr>`);
       if (hasPnlData) {
         rows.push(`<tr><th class="row-head" style="padding-left:1.2rem;">└ 元本</th>${years.map(d => `<td>${man(d.investPrincipal)}</td>`).join('')}</tr>`);
-        rows.push(`<tr><th class="row-head" style="padding-left:1.2rem;">└ 含み益</th>${years.map(d => `<td class="pos">${man(d.investPnl)}</td>`).join('')}</tr>`);
+        rows.push(`<tr><th class="row-head" style="padding-left:1.2rem;">└ 含み益</th>${years.map(d => `<td class="${d.investPnl < 0 ? 'neg' : 'pos'}">${man(d.investPnl)}</td>`).join('')}</tr>`);
       }
       rows.push(`<tr class="emphasis"><th class="row-head">年末資産</th>${years.map(d => `<td${cls(d.endA)}>${man(d.endA)}</td>`).join('')}</tr>`);
       if (hasLoans) {

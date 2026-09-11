@@ -44,7 +44,7 @@
         <div class="card" style="margin-bottom: 1rem;">
           <h3 style="margin: 0 0 0.5rem; font-size: 1.05rem;">資産残高 (月末)</h3>
           <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
-            ⋮⋮を掴んで並び替え。外貨口座は外貨額×レート。<a href="/settings.html">設定</a>で口座を追加・編集できます。
+            ⋮⋮を掴んで並び替え。外貨口座は外貨額×レート。株・投信は評価額の下に含み益も入力できます(含み損は ± ボタンでマイナスに)。<a href="/settings.html">設定</a>で口座を追加・編集できます。
           </p>
           <div class="table-wrap" id="assets-table-wrap" style="display:none;">
             <table class="table stacked-mobile">
@@ -261,6 +261,20 @@
       document.getElementById('form-area').style.display = 'block';
     }
 
+    // 含み益の入力欄 (± ボタン付き)。
+    // iPhone の数字キーパッド(inputmode=numeric)にはマイナスキーがないので、符号はボタンで切り替える。
+    function pnlInputHtml(acc, col, ex, extraClass, placeholder) {
+      const pnl = ex?.unrealized_pnl != null ? Math.round(Number(ex.unrealized_pnl)) : '';
+      return `
+        <div class="pnl-wrap">
+          <button type="button" class="pnl-sign" tabindex="-1" title="プラス/マイナスを切り替え" aria-label="含み益の符号を切り替え">±</button>
+          <input type="number" inputmode="numeric"
+            class="form-input pnl-input ${extraClass}"
+            data-account-id="${acc.id}" data-member-id="${col.id ?? ''}"
+            value="${pnl}" placeholder="${placeholder}" title="含み益 (含み損はマイナスで入力)">
+        </div>`;
+    }
+
     // ----- 資産: 口座 × 名義 のマトリクス入力 -----
     function renderAssetsMatrix(snapMap) {
       const wrap = document.getElementById('assets-table-wrap');
@@ -319,14 +333,8 @@
           if (acc.is_foreign_currency) {
             const fa = ex?.foreign_amount != null ? Number(ex.foreign_amount) : '';
             const calcInit = (fa !== '' && sharedRate !== '') ? Math.round(fa * sharedRate) : null;
-            const fxPnl = ex?.unrealized_pnl != null ? Math.round(Number(ex.unrealized_pnl)) : '';
             // 外貨でも投資性なら含み益(円換算後)を入力できる
-            const fxPnlInput = hasPnl(acc) ? `
-                  <input type="number" inputmode="numeric"
-                    class="form-input fx-input pnl-input"
-                    data-account-id="${acc.id}" data-member-id="${c.id ?? ''}"
-                    style="margin-top:2px; font-size:0.8rem; padding:0.25rem 0.5rem;"
-                    value="${fxPnl}" placeholder="含み益(円)" title="含み益(円換算)">` : '';
+            const fxPnlInput = hasPnl(acc) ? pnlInputHtml(acc, c, ex, 'fx-input', '含み益(円)') : '';
             return `
               <td class="num" data-label="${escapeHtml(c.name)}">
                 <div class="fx-cell">
@@ -340,21 +348,17 @@
             `;
           } else {
             const v = ex ? Math.round(Number(ex.balance)) : '';
-            const pnl = ex?.unrealized_pnl != null ? Math.round(Number(ex.unrealized_pnl)) : '';
             // 投資性の口座は「評価額 + 含み益」の2段入力
-            const pnlInput = hasPnl(acc) ? `
-                <input type="number" inputmode="numeric"
-                  class="form-input pnl-input"
-                  data-account-id="${acc.id}" data-member-id="${c.id ?? ''}"
-                  style="text-align:right; max-width: 160px; margin-top:2px; font-size:0.8rem; padding:0.25rem 0.5rem;"
-                  value="${pnl}" placeholder="含み益" title="含み益(評価額のうち増えた分)">` : '';
+            const pnlInput = hasPnl(acc) ? pnlInputHtml(acc, c, ex, '', '含み益') : '';
             return `
               <td class="num" data-label="${escapeHtml(c.name)}">
-                <input type="number" inputmode="numeric"
-                  class="form-input asset-input"
-                  data-account-id="${acc.id}" data-member-id="${c.id ?? ''}"
-                  style="text-align:right; max-width: 160px;"
-                  value="${v}" placeholder="評価額">${pnlInput}
+                <div class="cell-stack">
+                  <input type="number" inputmode="numeric"
+                    class="form-input asset-input"
+                    data-account-id="${acc.id}" data-member-id="${c.id ?? ''}"
+                    style="text-align:right; max-width: 160px;"
+                    value="${v}" placeholder="評価額">${pnlInput}
+                </div>
               </td>
             `;
           }
@@ -380,6 +384,28 @@
         inp.addEventListener('input', () => recalcFx(inp.dataset.accountId));
       });
       tbody.querySelectorAll('.copy-prev-asset').forEach(b => b.addEventListener('click', () => copyPrevAsset(b.dataset.id)));
+
+      // ± ボタン: 含み益の符号を反転 (空欄なら入力欄にフォーカスするだけ)
+      tbody.querySelectorAll('.pnl-sign').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const inp = btn.parentElement.querySelector('.pnl-input');
+          const n = parseInt(inp.value, 10);
+          if (isNaN(n) || n === 0) { inp.focus(); return; }
+          inp.value = -n;
+          inp.dispatchEvent(new Event('input', { bubbles: true }));  // dirty マークを付ける
+          updatePnlSignStyle(inp);
+        });
+      });
+      tbody.querySelectorAll('.pnl-input').forEach(inp => {
+        inp.addEventListener('input', () => updatePnlSignStyle(inp));
+        updatePnlSignStyle(inp);
+      });
+    }
+
+    // 含み損(マイナス)は赤字で表示して分かるようにする
+    function updatePnlSignStyle(inp) {
+      const n = parseInt(inp.value, 10);
+      inp.classList.toggle('is-loss', !isNaN(n) && n < 0);
 
       // D&D
       Sortable.create(tbody, {
@@ -463,7 +489,7 @@
       tr.querySelectorAll('.pnl-input').forEach(inp => {
         const memberId = inp.dataset.memberId || null;
         const prev = prevSnapMap.get(`${accountId}|${memberId ?? 'shared'}`);
-        if (prev?.unrealized_pnl != null) inp.value = Math.round(Number(prev.unrealized_pnl));
+        if (prev?.unrealized_pnl != null) { inp.value = Math.round(Number(prev.unrealized_pnl)); updatePnlSignStyle(inp); }
       });
       if (copied === 0) toast('前月のデータがありません', 'warn');
       else markDirty();
