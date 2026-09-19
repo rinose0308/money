@@ -1,20 +1,21 @@
 name: Supabase Keepalive
 
 # 目的:
-# 1. Supabase無料プランは7日間アクセスがないと自動で一時停止される。
-#    毎日1回、軽いクエリを投げて「使用中」状態を保つ。
+# 1. Supabase無料プランは「1週間のあいだ十分なDBアクティビティがない」と自動で一時停止される。
+#    公式ドキュメントの基準は "a few user requests to the database each day"。
+#    以前は 1日1回・1クエリ だったため「不十分」と判定され警告メールが来た (2026-09)。
+#    → 1日3回、毎回 複数テーブルにクエリを投げて、余裕を持って基準を超える。
 # 2. それでも停止してしまった場合は、Management API で自動復旧 (Resume) する。
 #    ※ 自動復旧には SUPABASE_ACCESS_TOKEN シークレットの登録が必要。
 #       https://supabase.com/dashboard/account/tokens でトークンを発行し、
 #       リポジトリの Settings > Secrets and variables > Actions に登録する。
 # 3. GitHubは「リポジトリに60日間コミットが無い」と scheduled workflow を
-#    無効化するため、実行のたびに .keepalive へ実行時刻をコミットして
-#    タイマーをリセットする。
+#    無効化するため、1日1回 .keepalive に日付をコミットしてタイマーをリセットする。
 
 on:
   schedule:
-    # 毎日 UTC 15:00 (日本時間 0:00) に実行
-    - cron: '0 15 * * *'
+    # 1日3回 UTC 3:00 / 11:00 / 19:00 (日本時間 12:00 / 20:00 / 4:00)
+    - cron: '0 3,11,19 * * *'
   # 手動実行も可能 (ActionsタブのRun workflowボタン)
   workflow_dispatch:
 
@@ -35,21 +36,40 @@ jobs:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
 
-      - name: Supabaseにping (停止していたら自動復旧)
+      - name: Supabaseにアクティビティを発生させる (停止していたら自動復旧)
         run: |
-          ping_once() {
+          # 1テーブルに GET (select) を投げて HTTP ステータスを返す
+          # (select=* にしているのは、主キー名がテーブルごとに違うため。RLS で中身は返らない)
+          ping_table() {
             curl -sS -o /dev/null -w "%{http_code}" \
-              "${SUPABASE_URL}/rest/v1/households?select=id&limit=1" \
+              "${SUPABASE_URL}/rest/v1/$1?select=*&limit=1" \
               -H "apikey: ${ANON_KEY}" \
               -H "Authorization: Bearer ${ANON_KEY}" \
               --max-time 20 2>/dev/null || echo "000"
           }
+          # count クエリ (HEAD + Prefer: count=exact)。RLS で 0 件でも SELECT count(*) が DB で実行される
+          count_table() {
+            curl -sS -o /dev/null -w "%{http_code}" -I \
+              "${SUPABASE_URL}/rest/v1/$1?select=*" \
+              -H "apikey: ${ANON_KEY}" \
+              -H "Authorization: Bearer ${ANON_KEY}" \
+              -H "Prefer: count=exact" \
+              --max-time 20 2>/dev/null || echo "000"
+          }
 
-          CODE=$(ping_once)
-          echo "ping結果: HTTP ${CODE}"
+          # 稼働判定のカナリア (このテーブルが 200 なら稼働中)
+          CODE=$(ping_table households)
+          echo "カナリア households: HTTP ${CODE}"
 
           if [ "${CODE}" = "200" ]; then
-            echo "✅ Supabaseは稼働中。キープアライブ成功。"
+            # 稼働中 → 複数テーブルに select + count を投げて「1日に数回」の基準を余裕で超える
+            OK=1; TOTAL=1
+            for t in household_members accounts asset_snapshots incomes transactions expense_categories life_plan_settings; do
+              c1=$(ping_table "$t");  TOTAL=$((TOTAL+1)); [ "$c1" = "200" ] && OK=$((OK+1))
+              c2=$(count_table "$t"); TOTAL=$((TOTAL+1)); [ "$c2" = "200" ] && OK=$((OK+1))
+              echo "  ${t}: select ${c1} / count ${c2}"
+            done
+            echo "✅ Supabaseは稼働中。${OK}/${TOTAL} リクエスト成功。キープアライブ完了。"
             exit 0
           fi
 
@@ -76,7 +96,7 @@ jobs:
           # 最大10分間 (30秒 x 20回) 復旧を待つ
           for i in $(seq 1 20); do
             sleep 30
-            CODE=$(ping_once)
+            CODE=$(ping_table households)
             echo "  復旧確認 ${i}/20: HTTP ${CODE}"
             if [ "${CODE}" = "200" ]; then
               echo "✅ 自動復旧に成功しました。"
@@ -87,14 +107,15 @@ jobs:
           echo "❌ 10分待っても復旧を確認できませんでした。Supabaseダッシュボードを確認してください。"
           exit 1
 
-      - name: 実行時刻を記録して自動コミット (60日タイマー対策)
+      - name: 実行日を記録して自動コミット (60日タイマー対策・1日1回だけ)
         run: |
-          echo "Last keepalive run: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" > .keepalive
+          # 日付だけを書くので、同じ日の2回目・3回目は差分なし → コミットしない
+          echo "Last keepalive run: $(date -u '+%Y-%m-%d') UTC" > .keepalive
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .keepalive
           if git diff --staged --quiet; then
-            echo "変更なし。コミットをスキップ。"
+            echo "本日は記録済み。コミットをスキップ。"
           else
             # [skip ci] を付けて Vercel の無駄な再デプロイを防ぐ
             git commit -m "chore: keepalive $(date -u '+%Y-%m-%d') [skip ci]"
