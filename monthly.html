@@ -400,12 +400,6 @@
         inp.addEventListener('input', () => updatePnlSignStyle(inp));
         updatePnlSignStyle(inp);
       });
-    }
-
-    // 含み損(マイナス)は赤字で表示して分かるようにする
-    function updatePnlSignStyle(inp) {
-      const n = parseInt(inp.value, 10);
-      inp.classList.toggle('is-loss', !isNaN(n) && n < 0);
 
       // D&D
       Sortable.create(tbody, {
@@ -433,6 +427,12 @@
           // 値の復元(再描画なし、現在のDOMをそのまま使うので不要)
         }),
       });
+    }
+
+    // 含み損(マイナス)は赤字で表示して分かるようにする
+    function updatePnlSignStyle(inp) {
+      const n = parseInt(inp.value, 10);
+      inp.classList.toggle('is-loss', !isNaN(n) && n < 0);
     }
 
     function recalcFx(accountId) {
