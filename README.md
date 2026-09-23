@@ -32,9 +32,16 @@ money/
 
 1. https://supabase.com/dashboard で対象プロジェクトを開く
 2. 左メニュー **SQL Editor** → **New query**
-3. `supabase/migrations/0001_initial.sql` の中身をコピーして貼り付け
-4. **Run** をクリック → 「Success. No rows returned」が出ればOK
-5. 左メニュー **Table Editor** で7テーブル(households, profiles, accounts, asset_snapshots, transactions, incomes, category_rules) が作成されていることを確認
+3. `supabase/migrations/` の中身を **0001 から順番に** コピーして貼り付け → **Run**
+   (`0001_initial.sql` → `0002...` → … → `0012_data_api_grants.sql`)
+4. 各ファイルで「Success. No rows returned」が出ればOK
+5. 左メニュー **Table Editor** で12テーブルが作成されていることを確認
+
+> **0012 を飛ばさないこと。** Supabase は 2026-10-30 から、新しく作ったテーブルを
+> Data API に自動公開しなくなった。0012 の GRANT が無いと、テーブルは作られるのに
+> アプリからは permission denied で一切読めない状態になる。
+> 今後テーブルを追加するときも、`create table` と同じファイルに GRANT を書くこと
+> (テンプレートは 0012 の末尾にある)。
 
 ### 2. Supabase Auth の設定
 
