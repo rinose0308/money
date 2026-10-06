@@ -32,6 +32,9 @@ env:
 jobs:
   ping:
     runs-on: ubuntu-latest
+    # 復旧待ち(最大10分)を含めても20分で必ず終わらせる。
+    # 2026-10-05 に一時的な通信失敗から復旧待ちループに入り、15分走って打ち切られた。
+    timeout-minutes: 20
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v5
@@ -57,9 +60,20 @@ jobs:
               --max-time 20 2>/dev/null || echo "000"
           }
 
-          # 稼働判定のカナリア (このテーブルが 200 なら稼働中)
-          CODE=$(ping_table households)
-          echo "カナリア households: HTTP ${CODE}"
+          # 稼働判定のカナリア。
+          # 1回の失敗で「停止した」と断定すると、ネットワークの一時的な不調でも
+          # 復旧API呼び出し + 10分の待機ループに入ってしまう (2026-10-05 に発生)。
+          # 15秒あけて3回試し、全部ダメなときだけ本当に停止とみなす。
+          CODE=""
+          for attempt in 1 2 3; do
+            CODE=$(ping_table households)
+            if [ "${CODE}" = "200" ]; then
+              [ "${attempt}" != "1" ] && echo "カナリア households: ${attempt}回目で復帰 (HTTP 200)"
+              break
+            fi
+            echo "カナリア households: ${attempt}/3 回目 HTTP ${CODE}"
+            [ "${attempt}" != "3" ] && sleep 15
+          done
 
           if [ "${CODE}" = "200" ]; then
             # 稼働中 → 複数テーブルに select + count を投げて「1日に数回」の基準を余裕で超える
