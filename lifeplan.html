@@ -189,7 +189,10 @@
           <button type="button" class="btn btn-ghost btn-sm" id="add-loan-btn">＋ 追加</button>
         </div>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
-          ペアローンは2件登録してください。現在残高・金利・借入年・返済年数から毎年の返済額を自動計算し、資産予測から差し引きます。<br>
+          銀行の<strong>返済予定表</strong>から写してください。ペアローンは2件登録します。<br>
+          ・現在残高 = 直近に返済した月の「返済後残高」/ 最終返済月 = 予定表の最後の月<br>
+          ・毎月の返済額を入れると予定表どおりに計算し、返しきれない分は最終月の一括返済になります(空欄なら完済まで同額で自動計算)<br>
+          ・<span id="loan-start-note"></span><br>
           <span style="color: var(--warning);">※ 上の「年間支出」にローン返済を含めている場合は二重計上になります。含めない金額にしてください。</span>
         </p>
         <div class="table-wrap" id="loans-wrap" style="display:none;">
@@ -199,45 +202,64 @@
                 <th>名義</th>
                 <th class="num">現在残高</th>
                 <th class="num">金利(%)</th>
-                <th class="num">借入年</th>
-                <th class="num">返済年数</th>
-                <th class="num">年間返済</th>
+                <th class="num">最終返済月</th>
+                <th class="num">毎月の返済額</th>
+                <th>5年ルール</th>
+                <th class="num">最終回の支払</th>
                 <th class="num">利息総額</th>
-                <th class="num">総支払額</th>
-                <th class="num">完済年</th>
                 <th style="width:40px;"></th>
               </tr>
             </thead>
             <tbody id="loans-tbody"></tbody>
           </table>
         </div>
+        <p id="loans-calc-note" style="display:none; color: var(--text-muted); font-size: 0.78rem; margin: 0.4rem 0 0;">
+          右の2列は、繰上げ返済をしない場合(予定表どおり)の値です。5年ルールありは、次回見直し月(以後5年ごと)に返済額を見直し、上げ幅は直前の125%までで計算します。
+        </p>
         <div id="loans-empty" style="color: var(--text-muted); font-size: 0.9rem; padding: 0.5rem 0;">
           住宅ローンはまだありません。「＋ 追加」で登録できます。
         </div>
       </div>
 
-      <!-- 金利シナリオ比較 (A/B) -->
-      <div class="card" id="rate-scenario-card" style="display:none; margin-bottom: 1rem;">
-        <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">金利シナリオ比較 (A / B)</h3>
-        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
-          <strong>シナリオA</strong> = 上のローン表に入力した金利。<strong>シナリオB</strong> = そこに指定の幅を上乗せした金利。<br>
-          金利が上がった場合に負担がどう変わるかを比較できます。
-        </p>
-        <div class="grid cols-2" style="gap: 0.75rem;">
-          <div class="form-group" style="margin:0;">
-            <label class="form-label" for="lp-rate-delta">シナリオB: 金利の上乗せ幅 (%ポイント)</label>
-            <input type="number" id="lp-rate-delta" class="form-input" step="0.1" inputmode="decimal" placeholder="例: 1.0 (空欄=比較しない)">
-            <p class="form-help" id="lp-rate-delta-help">各ローンの金利にこの値を加えて再計算します</p>
-          </div>
-        </div>
-        <div id="rate-scenario-table" style="display:none; margin-top: 0.85rem;"></div>
-      </div>
-
-      <!-- 早期返済シミュレーション -->
+      <!-- 繰上げ返済 -->
       <div class="card" id="prepay-card" style="display:none; margin-bottom: 1rem;">
-        <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">ローンの早期返済シミュレーション</h3>
-        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
-          指定した年にローン残高を一括返済した場合を試算します。返済原資は<strong>その時点の現預金を指定割合まで使い、足りない分は運用資産を取り崩す</strong>想定です。
+        <h3 style="margin: 0 0 0.6rem; font-size: 1rem;">繰上げ返済</h3>
+
+        <!-- しわ寄せチェック: 最終月の一括返済と、それを消す繰上げ額の逆算 -->
+        <div id="balloon-check"></div>
+
+        <!-- 繰上げ返済の予定 -->
+        <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0 0.25rem;">
+          <h4 style="margin: 0; font-size: 0.95rem;">繰上げ返済の予定</h4>
+          <button type="button" class="btn btn-ghost btn-sm" id="add-prepay-btn">＋ 追加</button>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.82rem; margin: 0 0 0.6rem;">
+          その年の初めに現預金から繰上げます(足りない分は運用資産を取り崩し)。終了年を入れると毎年くり返します。<br>
+          <strong>期間短縮型</strong> = 毎月の返済額はそのままで早く終わる(しわ寄せを消すならこちら)/ <strong>返済額軽減型</strong> = 毎月の返済額が下がる
+        </p>
+        <div class="table-wrap" id="prepays-wrap" style="display:none;">
+          <table class="table stacked-mobile">
+            <thead>
+              <tr>
+                <th>対象ローン</th>
+                <th class="num">開始年</th>
+                <th class="num">終了年</th>
+                <th class="num">1回の金額</th>
+                <th>方式</th>
+                <th style="width:40px;"></th>
+              </tr>
+            </thead>
+            <tbody id="prepays-tbody"></tbody>
+          </table>
+        </div>
+        <div id="prepays-empty" style="color: var(--text-muted); font-size: 0.88rem; padding: 0.25rem 0;">
+          まだ予定はありません。上のチェックの「予定に追加」ボタンか、「＋ 追加」で登録できます。
+        </div>
+
+        <!-- まとめて完済 -->
+        <h4 style="margin: 1.1rem 0 0.25rem; font-size: 0.95rem;">まとめて完済する(一括返済)</h4>
+        <p style="color: var(--text-muted); font-size: 0.82rem; margin: 0 0 0.6rem;">
+          指定した年の初めに残高を全額返済します。原資は<strong>その時点の現預金を指定割合まで使い、足りない分は運用資産を取り崩す</strong>想定です。
         </p>
         <div class="grid cols-2" style="gap: 0.75rem;">
           <div class="form-group" style="margin:0;">
@@ -251,7 +273,27 @@
             <p class="form-help">残りは運用資産(株・投信)を取り崩します</p>
           </div>
         </div>
-        <div id="prepay-summary" style="display:none; margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px dashed var(--border); font-size: 0.88rem;"></div>
+        <div id="prepay-summary" style="display:none; margin-top: 0.75rem; font-size: 0.88rem;"></div>
+
+        <!-- 効果の比較 (繰上げなし vs あり) -->
+        <div id="prepay-effect" style="display:none; margin-top: 1rem; padding-top: 0.85rem; border-top: 1px dashed var(--border);"></div>
+      </div>
+
+      <!-- 金利シナリオ比較 (A/B) -->
+      <div class="card" id="rate-scenario-card" style="display:none; margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">金利シナリオ比較 (A / B)</h3>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
+          <strong>シナリオA</strong> = 上のローン表に入力した金利。<strong>シナリオB</strong> = そこに指定の幅を上乗せした金利。<br>
+          金利が上がった場合に負担がどう変わるかを比較できます(繰上げ返済の予定はA・Bとも同じものを使います)。
+        </p>
+        <div class="grid cols-2" style="gap: 0.75rem;">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-rate-delta">シナリオB: 金利の上乗せ幅 (%ポイント)</label>
+            <input type="number" id="lp-rate-delta" class="form-input" step="0.1" inputmode="decimal" placeholder="例: 1.0 (空欄=比較しない)">
+            <p class="form-help" id="lp-rate-delta-help">各ローンの金利にこの値を加えて再計算します</p>
+          </div>
+        </div>
+        <div id="rate-scenario-table" style="display:none; margin-top: 0.85rem;"></div>
       </div>
 
       <!-- グラフ -->
@@ -287,6 +329,11 @@
       listLifePlanLoans, replaceLifePlanLoans,
     } from '/js/api.js';
     import { formatYen, formatYenShort, toast, withErrorToast } from '/js/utils.js';
+    import {
+      monthIndex, monthLabel, yearOf, levelPayment,
+      createLoan, prepayLoan, stepMonth, isBalloon,
+      simulateLoan, solveYearlyPrepay, solveLumpPrepay,
+    } from '/js/loan.js';
 
     const auth = await requireAuth();
     if (!auth) throw new Error('not authenticated');
@@ -316,7 +363,7 @@
         ? `<div class="empty-state" style="max-width:520px;margin:0 auto;">
              <h3>データベースの準備が必要です</h3>
              <p style="margin:0.5rem 0;">ライフプラン用のテーブルがまだ作成されていません。<br>
-             Supabase の SQL Editor で <code>0006</code>〜<code>0011</code> のマイグレーション(<code>supabase/migrations/</code>)を実行してください。</p>
+             Supabase の SQL Editor で <code>0006</code>〜<code>0013</code> のマイグレーション(<code>supabase/migrations/</code>)を実行してください。</p>
              <button class="btn btn-primary btn-sm" onclick="location.reload()">実行したら再読み込み</button>
            </div>`
         : `<div class="empty-state" style="max-width:520px;margin:0 auto;">
@@ -479,35 +526,15 @@
     const loansWrap = document.getElementById('loans-wrap');
     const loansEmpty = document.getElementById('loans-empty');
 
+    // 計算を始める月: 開始年が今年なら今月の返済から、それ以外はその年の1月から
+    const nowMonthIdx = nowYear * 12 + new Date().getMonth();
+    const startIdxOf = (startY) => (startY === nowYear ? nowMonthIdx : startY * 12);
+
     function refreshLoansVisibility() {
       const has = loansTbody.children.length > 0;
       loansWrap.style.display = has ? 'block' : 'none';
       loansEmpty.style.display = has ? 'none' : 'block';
-    }
-
-    // 年間返済額(元利均等・年次)。残り年数で現在残高を返済しきる額
-    function annualPayment(balance, ratePct, completeYear, fromYear) {
-      const N = (completeYear != null) ? (completeYear - fromYear) : null;
-      if (!N || N <= 0 || !balance || balance <= 0) return 0;
-      const ra = (ratePct || 0) / 100;
-      if (ra === 0) return Math.round(balance / N);
-      return Math.round(balance * ra / (1 - Math.pow(1 + ra, -N)));
-    }
-
-    // 指定金利で完済まで返した場合の 年間返済 / 利息総額 / 総支払額
-    function loanTotals(balance, ratePct, startY, completeYear) {
-      const pay = annualPayment(balance, ratePct, completeYear, startY);
-      let bal = balance, interest = 0, paid = 0;
-      if (completeYear != null && pay > 0) {
-        for (let y = startY; y < completeYear && bal > 0; y++) {
-          const int = Math.round(bal * (ratePct || 0) / 100);
-          let p = pay, principal = p - int;
-          if (principal >= bal) { p = bal + int; principal = bal; }
-          bal = Math.max(0, bal - principal);
-          interest += int; paid += p;
-        }
-      }
-      return { pay, interest, paid };
+      document.getElementById('loans-calc-note').style.display = has ? 'block' : 'none';
     }
 
     function memberOptions(selectedId) {
@@ -515,22 +542,50 @@
         members.map(m => `<option value="${m.id}"${m.id === selectedId ? ' selected' : ''}>${escapeHtml(m.name)}</option>`).join('');
     }
 
+    // ローンの表示名 (繰上げの対象ローン・比較表に使う)。名義がなければ「ローン1」
+    function loanName(tr) {
+      const m = members.find(x => x.id === tr.querySelector('.ln-member').value);
+      return m ? m.name : `ローン${[...loansTbody.querySelectorAll('.loan-row')].indexOf(tr) + 1}`;
+    }
+
+    // 「X年Yヶ月」
+    function durLabel(months) {
+      const y = Math.floor(months / 12), m = months % 12;
+      return y === 0 ? `${m}ヶ月` : (m === 0 ? `${y}年` : `${y}年${m}ヶ月`);
+    }
+
+    let loanSeq = 0;   // 行ごとの識別子 (繰上げ予定がどのローンを指すかに使う)
     function addLoanRow(loan = {}) {
       const tr = document.createElement('tr');
       tr.className = 'loan-row';
+      tr.dataset.key = `L${++loanSeq}`;
+      // 旧データの借入年・返済年数は、保存時にそのまま書き戻す
+      if (loan.start_year != null) tr.dataset.startYear = loan.start_year;
+      if (loan.term_years != null) tr.dataset.termYears = loan.term_years;
+      const five = !!loan.five_year_rule;
       tr.innerHTML = `
         <td data-label="名義"><select class="form-select ln-member" style="min-width:110px;">${memberOptions(loan.member_id)}</select></td>
         <td class="num" data-label="現在残高"><input type="number" inputmode="numeric" class="form-input ln-bal" style="text-align:right; max-width:150px;" value="${loan.current_balance ?? ''}"></td>
-        <td class="num" data-label="金利(%)"><input type="number" step="0.01" inputmode="decimal" class="form-input ln-rate" style="text-align:right; max-width:90px;" value="${loan.interest_rate ?? ''}"></td>
-        <td class="num" data-label="借入年"><input type="number" class="form-input ln-start" min="1990" max="2100" style="text-align:right; max-width:90px;" value="${loan.start_year ?? ''}"></td>
-        <td class="num" data-label="返済年数"><input type="number" class="form-input ln-term" min="1" max="50" style="text-align:right; max-width:80px;" value="${loan.term_years ?? ''}"></td>
-        <td class="num" data-label="年間返済"><span class="ln-pay" style="font-variant-numeric:tabular-nums;">—</span></td>
-        <td class="num" data-label="利息総額"><span class="ln-interest" style="font-variant-numeric:tabular-nums; color:var(--danger);">—</span></td>
-        <td class="num" data-label="総支払額"><span class="ln-totalpay" style="font-variant-numeric:tabular-nums;">—</span></td>
-        <td class="num" data-label="完済年"><span class="ln-done">—</span></td>
+        <td class="num" data-label="金利(%)"><input type="number" step="0.001" inputmode="decimal" class="form-input ln-rate" style="text-align:right; max-width:90px;" value="${loan.interest_rate ?? ''}"></td>
+        <td class="num" data-label="最終返済月"><input type="month" class="form-input ln-final" style="max-width:170px;${loan.final_derived ? ' border-color: var(--warning);' : ''}" value="${escapeHtml(loan.final_month ?? '')}"${loan.final_derived ? ' title="借入年+返済年数から仮に設定しました。予定表の最終返済月に合わせてください"' : ''}></td>
+        <td class="num" data-label="毎月の返済額"><input type="number" inputmode="numeric" class="form-input ln-monthly" style="text-align:right; max-width:150px;" value="${loan.monthly_payment ?? ''}" placeholder="自動"></td>
+        <td data-label="5年ルール">
+          <div class="five-cell">
+            <label class="five-chk"><input type="checkbox" class="ln-5y"${five ? ' checked' : ''}> あり</label>
+            <input type="month" class="form-input ln-review" title="次回の返済額見直し月 (以後5年ごと)" style="max-width:170px;${five ? '' : ' display:none;'}" value="${escapeHtml(loan.next_review_month ?? '')}">
+          </div>
+        </td>
+        <td class="num" data-label="最終回の支払"><span class="ln-final-pay">—</span></td>
+        <td class="num" data-label="利息総額"><span class="ln-interest" style="color:var(--danger); font-variant-numeric:tabular-nums;">—</span></td>
         <td class="actions-cell"><button type="button" class="btn btn-ghost btn-sm ln-del" title="削除">✕</button></td>
       `;
-      tr.querySelector('.ln-del').addEventListener('click', () => { tr.remove(); refreshLoansVisibility(); recompute(); });
+      tr.querySelector('.ln-del').addEventListener('click', () => {
+        tr.remove(); refreshLoansVisibility(); refreshPrepayTargets(); recompute();
+      });
+      tr.querySelector('.ln-5y').addEventListener('change', (e) => {
+        tr.querySelector('.ln-review').style.display = e.target.checked ? '' : 'none';
+      });
+      tr.querySelector('.ln-member').addEventListener('change', refreshPrepayTargets);
       // 金利や残高を変えたら即再計算 (change だけでなく input でも拾う)
       tr.querySelectorAll('input, select').forEach(inp => {
         inp.addEventListener('input', recompute);
@@ -538,34 +593,148 @@
       });
       loansTbody.appendChild(tr);
       refreshLoansVisibility();
+      return tr;
     }
 
     for (const l of (loanRows ?? [])) {
+      // 0013 より前に保存したローンには最終返済月がないので、借入年+返済年数から仮に置く
+      const derived = !l.final_month && l.start_year && l.term_years;
       addLoanRow({
-        member_id: l.member_id, current_balance: l.current_balance,
-        interest_rate: l.interest_rate, start_year: l.start_year, term_years: l.term_years,
+        member_id: l.member_id, current_balance: l.current_balance, interest_rate: l.interest_rate,
+        final_month: l.final_month ?? (derived ? `${l.start_year + l.term_years}-12` : ''),
+        final_derived: derived,
+        monthly_payment: l.monthly_payment, five_year_rule: l.five_year_rule, next_review_month: l.next_review_month,
+        start_year: l.start_year, term_years: l.term_years,
       });
     }
 
-    document.getElementById('add-loan-btn').addEventListener('click', () => { addLoanRow(); recompute(); });
+    document.getElementById('add-loan-btn').addEventListener('click', () => { addLoanRow(); refreshPrepayTargets(); recompute(); });
 
-    // 現在のローン一覧
+    // 残高が入っているローン (画面の並び順)。保存もこの順で、繰上げ予定の loan 番号もこの並び
     function collectLoans() {
       const loans = [];
       loansTbody.querySelectorAll('.loan-row').forEach(tr => {
         const bal = toInt(tr.querySelector('.ln-bal').value);
         if (bal == null || bal <= 0) return;
+        const finalMonth = tr.querySelector('.ln-final').value.trim();
+        const review = tr.querySelector('.ln-review').value.trim();
         loans.push({
+          key: tr.dataset.key,
+          name: loanName(tr),
           member_id: tr.querySelector('.ln-member').value || null,
           current_balance: bal,
           interest_rate: parseFloat(tr.querySelector('.ln-rate').value) || 0,
-          start_year: toInt(tr.querySelector('.ln-start').value),
-          term_years: toInt(tr.querySelector('.ln-term').value),
+          final_month: finalMonth || null,
+          finalIdx: monthIndex(finalMonth),
+          monthly_payment: toInt(tr.querySelector('.ln-monthly').value),
+          five_year_rule: tr.querySelector('.ln-5y').checked,
+          next_review_month: review || null,
+          reviewIdx: monthIndex(review),
+          start_year: tr.dataset.startYear ? +tr.dataset.startYear : null,
+          term_years: tr.dataset.termYears ? +tr.dataset.termYears : null,
           _row: tr,
         });
       });
       return loans;
     }
+
+    // 月次エンジン用の仕様 (rateDelta = 金利シナリオBの上乗せ幅)
+    const loanSpec = (ln, rateDelta = 0) => ({
+      balance: ln.current_balance,
+      ratePct: Math.max(0, (ln.interest_rate || 0) + rateDelta),
+      finalIdx: ln.finalIdx,
+      payment: ln.monthly_payment,
+      fiveYear: ln.five_year_rule,
+      reviewIdx: ln.reviewIdx,
+    });
+
+    // ======== 繰上げ返済の予定 ========
+    const ppTbody = document.getElementById('prepays-tbody');
+
+    function refreshPrepaysVisibility() {
+      const has = ppTbody.children.length > 0;
+      document.getElementById('prepays-wrap').style.display = has ? 'block' : 'none';
+      document.getElementById('prepays-empty').style.display = has ? 'none' : 'block';
+    }
+
+    // 対象ローンの選択肢。選んでいたローンが削除されたら勝手に別のローンへ付け替えず「選択して」と出す
+    function loanTargetOptions(selectedKey) {
+      const rows = [...loansTbody.querySelectorAll('.loan-row')];
+      const opts = rows.map(tr =>
+        `<option value="${tr.dataset.key}"${tr.dataset.key === selectedKey ? ' selected' : ''}>${escapeHtml(loanName(tr))}</option>`).join('');
+      return rows.some(tr => tr.dataset.key === selectedKey)
+        ? opts
+        : `<option value="" selected>(ローンを選択)</option>${opts}`;
+    }
+    function refreshPrepayTargets() {
+      ppTbody.querySelectorAll('.pp-loan').forEach(sel => { sel.innerHTML = loanTargetOptions(sel.dataset.key); });
+    }
+
+    function addPrepayRow(p = {}) {
+      const tr = document.createElement('tr');
+      tr.className = 'pp-row';
+      const mode = p.mode === 'reduce' ? 'reduce' : 'shorten';
+      tr.innerHTML = `
+        <td data-label="対象ローン"><select class="form-select pp-loan" style="min-width:120px;"></select></td>
+        <td class="num" data-label="開始年"><input type="number" class="form-input pp-from" min="2000" max="2100" style="text-align:right; max-width:100px;" value="${p.from ?? ''}"></td>
+        <td class="num" data-label="終了年"><input type="number" class="form-input pp-to" min="2000" max="2100" style="text-align:right; max-width:100px;" value="${p.to ?? ''}" placeholder="1回だけ"></td>
+        <td class="num" data-label="1回の金額"><input type="number" inputmode="numeric" class="form-input pp-amount" style="text-align:right; max-width:150px;" value="${p.amount ?? ''}"></td>
+        <td data-label="方式"><select class="form-select pp-mode" style="min-width:130px;">
+          <option value="shorten"${mode === 'shorten' ? ' selected' : ''}>期間短縮型</option>
+          <option value="reduce"${mode === 'reduce' ? ' selected' : ''}>返済額軽減型</option>
+        </select></td>
+        <td class="actions-cell"><button type="button" class="btn btn-ghost btn-sm pp-del" title="削除">✕</button></td>
+      `;
+      const sel = tr.querySelector('.pp-loan');
+      sel.dataset.key = p.key ?? (loansTbody.querySelector('.loan-row')?.dataset.key ?? '');
+      sel.innerHTML = loanTargetOptions(sel.dataset.key);
+      sel.addEventListener('change', () => { sel.dataset.key = sel.value; });   // recompute より先に登録
+      tr.querySelector('.pp-del').addEventListener('click', () => { tr.remove(); refreshPrepaysVisibility(); recompute(); });
+      tr.querySelectorAll('input, select').forEach(inp => {
+        inp.addEventListener('input', recompute);
+        inp.addEventListener('change', recompute);
+      });
+      ppTbody.appendChild(tr);
+      refreshPrepaysVisibility();
+      return tr;
+    }
+
+    // 画面の予定 → [{ key, from, to, amount, mode }] (対象・開始年・金額が欠けた行は無視)
+    function collectPrepays() {
+      const out = [];
+      ppTbody.querySelectorAll('.pp-row').forEach(tr => {
+        const key = tr.querySelector('.pp-loan').dataset.key;
+        const from = toInt(tr.querySelector('.pp-from').value);
+        const toRaw = toInt(tr.querySelector('.pp-to').value);
+        const amount = toInt(tr.querySelector('.pp-amount').value);
+        if (!key || from == null || !(amount > 0)) return;
+        out.push({ key, from, to: (toRaw != null && toRaw >= from) ? toRaw : null, amount, mode: tr.querySelector('.pp-mode').value });
+      });
+      return out;
+    }
+
+    // 1本のローンについて、予定を年ごとに展開 (simulateLoan 用)
+    function expandPrepays(prepays, key) {
+      const out = [];
+      for (const p of prepays) {
+        if (p.key !== key) continue;
+        for (let y = p.from; y <= (p.to ?? p.from); y++) out.push({ year: y, amount: p.amount, mode: p.mode });
+      }
+      return out;
+    }
+
+    // 保存済みの予定を復元 (loan 番号 = 保存時のローンの並び順)
+    {
+      const keys = [...loansTbody.querySelectorAll('.loan-row')].map(tr => tr.dataset.key);
+      for (const p of (Array.isArray(S.loan_prepayments) ? S.loan_prepayments : [])) {
+        addPrepayRow({ key: keys[p.loan] ?? '', from: p.from, to: p.to, amount: p.amount, mode: p.mode });
+      }
+    }
+
+    document.getElementById('add-prepay-btn').addEventListener('click', () => {
+      addPrepayRow({ from: nowYear + 1 });
+      recompute();
+    });
 
     // ======== 試算 ========
     const tbody = document.getElementById('lp-tbody');
@@ -622,45 +791,53 @@
       if (endY < startY || endY - startY > 100) { tbody.innerHTML = ''; return; }
 
       const events = collectEvents();
+      const startIdx = startIdxOf(startY);
+      document.getElementById('loan-start-note').textContent =
+        `${monthLabel(startIdx)}の返済から計算します(現在残高はその直前の残高を入れてください)`;
 
-      // ローン: 各ローンの年間返済額と借入完済年を確定し、返済表示も更新
-      const loans = collectLoans();
+      // ---- ローン表の計算列: 予定表どおり(繰上げなし)の単体計算 ----
+      const allLoans = collectLoans();
+      const loans = allLoans.filter(ln => ln.finalIdx != null);   // 最終返済月がないと計算できない
       const hasLoans = loans.length > 0;
-      for (const ln of loans) {
-        ln.completeYear = (ln.start_year != null && ln.term_years != null) ? (ln.start_year + ln.term_years) : null;
-        ln.payment = annualPayment(ln.current_balance, ln.interest_rate, ln.completeYear, startY);
-        ln.balance = ln.current_balance;
-
-        // このローンを完済まで返した場合の利息総額・総支払額 (金利変更の影響が見えるように)
-        const t = loanTotals(ln.current_balance, ln.interest_rate, startY, ln.completeYear);
-        ln.totalInterest = t.interest;
-        ln.totalPaid = t.paid;
-
-        // ローン表の計算列を更新
-        if (ln._row) {
-          ln._row.querySelector('.ln-pay').textContent = ln.payment > 0 ? formatYen(ln.payment) : '—';
-          ln._row.querySelector('.ln-interest').textContent = t.interest > 0 ? formatYen(t.interest) : '—';
-          ln._row.querySelector('.ln-totalpay').textContent = t.paid > 0 ? formatYen(t.paid) : '—';
-          ln._row.querySelector('.ln-done').textContent = ln.completeYear ?? '—';
+      for (const ln of allLoans) {
+        const row = ln._row;
+        const monthlyInp = row.querySelector('.ln-monthly');
+        if (ln.finalIdx == null) {
+          row.querySelector('.ln-final-pay').innerHTML = '<span style="color:var(--warning);">最終返済月を入力</span>';
+          row.querySelector('.ln-interest').textContent = '—';
+          monthlyInp.placeholder = '自動';
+          continue;
         }
+        const r = simulateLoan(loanSpec(ln), startIdx, []);
+        monthlyInp.placeholder = `自動 ${r.firstPayment.toLocaleString()}`;
+        row.querySelector('.ln-final-pay').innerHTML = r.balloon
+          ? `<strong style="color:var(--danger);">${formatYen(r.finalPay)}</strong><span class="sub">${monthLabel(ln.finalIdx)}</span><span class="sub">(通常 ${formatYen(r.lastPayment)})</span>`
+          : '<span style="color:var(--success);">しわ寄せなし</span>';
+        row.querySelector('.ln-interest').textContent = formatYen(r.interest);
       }
 
-      // ---- 投影を1本走らせる (prepayYear を渡すとその年に一括返済) ----
-      // ローンの状態は毎回コピーして使う (2シナリオ回すため元データを壊さない)
-      function runProjection({ prepayYear = null, prepayRatio = 80, rateDelta = 0 } = {}) {
+      // ---- 投影を1本走らせる ----
+      //   prepays    = 繰上げ返済の予定 [{key, from, to, amount, mode}]
+      //   payoffYear = その年の初めに全額を一括返済 (原資は現預金を payoffRatio% まで → 残りは運用資産)
+      //   rateDelta  = 金利シナリオBの上乗せ幅
+      // ローンは月次エンジンで毎回作り直すので、何本走らせても互いに影響しない
+      function runProjection({ prepays: pps = [], payoffYear = null, payoffRatio = 80, rateDelta = 0 } = {}) {
         let cash = startCash, invest = startInvest;
         // 含み損(マイナス)もそのまま引き継ぐ。上限だけ運用資産まで(元本がマイナスにならないように)
         let investPnl = Math.min(ACTUAL.pnl ?? 0, invest);
-        // rateDelta を上乗せした金利で、年間返済額も再計算し直す
-        const lns = loans.map(l => {
-          const rate = Math.max(0, (l.interest_rate || 0) + rateDelta);
-          return {
-            ...l,
-            interest_rate: rate,
-            payment: rateDelta ? annualPayment(l.current_balance, rate, l.completeYear, startY) : l.payment,
-            balance: l.current_balance,
-          };
-        });
+        // 運用資産を取り崩して払う。元本・含み益は比率で減らし、足りなければ現預金をマイナスにして可視化
+        const sellInvest = (amount) => {
+          if (!(amount > 0)) return;
+          const pnlShare = invest > 0 ? investPnl / invest : 0;
+          const sell = Math.min(amount, invest);
+          invest -= sell;
+          investPnl = Math.round(investPnl - sell * pnlShare);   // 含み損なら符号を保ったまま縮む
+          if (sell < amount) cash -= (amount - sell);
+        };
+        const states = loans.map(ln => ({ key: ln.key, L: createLoan(loanSpec(ln, rateDelta), startIdx) }));
+        const stateByKey = new Map(states.map(s => [s.key, s]));
+        const outstanding = () => states.reduce((s, st) => s + st.L.balance + st.L.unpaid, 0);
+        let interestTotal = 0, balloonTotal = 0, prepaidTotal = 0;
         const years = [];
 
         for (let y = startY; y <= endY; y++) {
@@ -685,44 +862,49 @@
           // 退職金 (退職年に一時金として受け取る)
           const lumpSum = (retireYear != null && y === retireYear) ? retireLump : 0;
 
-          // 一括返済 (年初に実行)
-          let prepayAmount = 0, prepayFromCash = 0, prepayFromInvest = 0;
-          if (prepayYear != null && y === prepayYear) {
-            const outstanding = lns.reduce((s, ln) =>
-              s + ((ln.completeYear != null && y < ln.completeYear) ? ln.balance : 0), 0);
-            if (outstanding > 0) {
-              prepayAmount = outstanding;
+          // ---- 一括返済 / 繰上げ返済 (その年の最初の返済月の前に実行) ----
+          const firstIdx = y === startY ? startIdx : y * 12;
+          let prepayAmount = 0, prepayFromCash = 0, prepayFromInvest = 0;   // 一括返済
+          let partialPrepay = 0;                                              // 繰上げ返済
+          if (payoffYear != null && y === payoffYear) {
+            const total = outstanding();
+            if (total > 0) {
+              prepayAmount = total;
               // 現預金を指定割合まで使い、足りない分は運用資産を取り崩す
-              prepayFromCash = Math.min(Math.max(0, Math.round(cash * prepayRatio / 100)), outstanding);
-              prepayFromInvest = outstanding - prepayFromCash;
+              prepayFromCash = Math.min(Math.max(0, Math.round(cash * payoffRatio / 100)), total);
+              prepayFromInvest = total - prepayFromCash;
               cash -= prepayFromCash;
-              if (prepayFromInvest > 0) {
-                // 取り崩しは元本・含み益を按分して減らす
-                const pnlShare = invest > 0 ? investPnl / invest : 0;
-                const sell = Math.min(prepayFromInvest, invest);
-                invest -= sell;
-                investPnl = Math.round(investPnl - sell * pnlShare);   // 比率で減らす (含み損なら符号を保ったまま縮む)
-                // 運用資産が足りない場合は残りを現預金から (マイナスも許容して可視化)
-                if (sell < prepayFromInvest) cash -= (prepayFromInvest - sell);
-              }
-              for (const ln of lns) ln.balance = 0;
+              sellInvest(prepayFromInvest);
+              for (const st of states) prepayLoan(st.L, st.L.balance + st.L.unpaid, 'shorten', firstIdx);
+            }
+          } else {
+            for (const p of pps) {
+              if (y < p.from || y > (p.to ?? p.from)) continue;
+              const st = stateByKey.get(p.key);
+              if (st) partialPrepay += prepayLoan(st.L, p.amount, p.mode, firstIdx);   // 残高を超える分は充てない
+            }
+            if (partialPrepay > 0) {
+              // 現預金から払い、足りない分は運用資産を取り崩す
+              const fromCash = Math.min(Math.max(0, cash), partialPrepay);
+              cash -= fromCash;
+              sellInvest(partialPrepay - fromCash);
             }
           }
+          prepaidTotal += prepayAmount + partialPrepay;
 
-          // この年のローン返済と残高
-          let loanPay = 0, loanBal = 0, loanInterest = 0;
-          for (const ln of lns) {
-            if (ln.completeYear != null && y < ln.completeYear && ln.balance > 0) {
-              const interest = Math.round(ln.balance * (ln.interest_rate || 0) / 100);
-              let pay = ln.payment;
-              let principal = pay - interest;
-              if (principal >= ln.balance) { pay = ln.balance + interest; principal = ln.balance; } // 最終年
-              ln.balance = Math.max(0, ln.balance - principal);
-              loanPay += pay;
-              loanInterest += interest;
+          // ---- この年のローン返済 (月ごと。最終月のしわ寄せもここで払う) ----
+          let loanPay = 0, loanInterest = 0, balloonPay = 0;
+          for (const st of states) {
+            for (let idx = firstIdx; idx <= y * 12 + 11 && !st.L.done; idx++) {
+              const s = stepMonth(st.L, idx);
+              loanPay += s.pay;
+              loanInterest += s.interest;
+              if (s.final && isBalloon(s.pay, s.regular)) balloonPay += s.pay;
             }
-            loanBal += ln.balance;
           }
+          interestTotal += loanInterest;
+          balloonTotal += balloonPay;
+          const loanBal = outstanding();
 
           // 年間収支 (退職金は一時収入として加算)
           const cf = inc + lumpSum - exp - loanPay;
@@ -774,41 +956,55 @@
           const endA = cash + invest;
 
           years.push({
-            y, age: ageCell(y), inc, exp, loanPay, loanInterest, cf, growth,
+            y, age: ageCell(y), inc, exp, loanPay, loanInterest, balloonPay, cf, growth,
             contribution: contributedThisYear,
-            prepayAmount, prepayFromCash, prepayFromInvest,
+            prepayAmount, prepayFromCash, prepayFromInvest, partialPrepay,
             lumpSum, withdrawal, withdrawalCapped, retired,
             cash, invest, investPnl, investPrincipal: invest - investPnl,
             endA, loanBal, netWorth: endA - loanBal, note: ev.note ?? '',
           });
         }
+        // ローン全体のまとめ (比較表で使う)。全部終わっていれば最後に終わった月が完済月
+        const offs = states.map(st => st.L.paidOffIdx).filter(v => v != null);
+        years.loan = {
+          interestTotal, balloonTotal, prepaidTotal,
+          paidOffIdx: (states.length && states.every(st => st.L.done) && offs.length) ? Math.max(...offs) : null,
+        };
         return years;
       }
 
-      // ---- ベースライン(繰上返済なし) と 早期返済シナリオ ----
-      const baseline = runProjection();
+      // ---- 繰上げなし / 繰上げあり(予定+一括返済) / 金利シナリオB ----
+      const prepays = collectPrepays().filter(p => loans.some(ln => ln.key === p.key));
       const prepayYear = toInt(document.getElementById('lp-prepay-year').value);
       const prepayRatio = Math.min(100, Math.max(0, parseFloat(document.getElementById('lp-prepay-ratio').value) || 0));
-      const doPrepay = hasLoans && prepayYear != null && prepayYear >= startY && prepayYear <= endY;
-      const scenario = doPrepay ? runProjection({ prepayYear, prepayRatio }) : null;
+      const doPayoff = hasLoans && prepayYear != null && prepayYear >= startY && prepayYear <= endY;
+      const hasPlan = hasLoans && (prepays.length > 0 || doPayoff);
+      const planOpts = { prepays, payoffYear: doPayoff ? prepayYear : null, payoffRatio: prepayRatio };
+      const planLabel = [prepays.length ? '繰上げ返済' : null, doPayoff ? '一括返済' : null].filter(Boolean).join('+') + 'あり';
 
-      // ---- 金利シナリオB (指定幅を上乗せ) ----
+      const none = runProjection();
+      const plan = hasPlan ? runProjection(planOpts) : null;
+
       const rateDeltaRaw = document.getElementById('lp-rate-delta').value.trim();
       const rateDelta = rateDeltaRaw === '' ? null : (parseFloat(rateDeltaRaw) || 0);
       const doRateB = hasLoans && rateDelta != null && rateDelta !== 0;
-      // Bは「今の早期返済設定」を踏襲して比較する
-      const scenarioB = doRateB
-        ? runProjection({ prepayYear: doPrepay ? prepayYear : null, prepayRatio, rateDelta })
-        : null;
+      // B は「今の繰上げの予定」をそのまま使って金利だけ変える
+      const scenarioB = doRateB ? runProjection({ ...planOpts, rateDelta }) : null;
 
-      // 表とグラフは「早期返済あり」を主役にする(未設定ならベースライン)
-      const years = scenario ?? baseline;
+      // 表とグラフは「繰上げあり」を主役にする (予定がなければ繰上げなし)
+      const years = plan ?? none;
 
-      // グラフの縦線と年別表の見出しに出すイベント (退職 / 年金開始 / 一括返済)
+      // グラフの縦線と年別表の見出しに出すイベント
       const milestones = [];
       if (retireYear != null && retireYear >= startY && retireYear <= endY) milestones.push({ year: retireYear, label: '退職', color: '#dc2626' });
       if (pensionYear != null && pensionYear >= startY && pensionYear <= endY) milestones.push({ year: pensionYear, label: '年金', color: '#16a34a' });
-      if (doPrepay) milestones.push({ year: prepayYear, label: '一括返済', color: '#f59e0b' });
+      if (doPayoff) milestones.push({ year: prepayYear, label: '一括返済', color: '#f59e0b' });
+      const balloonRow = years.find(d => d.balloonPay > 0);
+      if (balloonRow) milestones.push({ year: balloonRow.y, label: '最終回一括', color: '#9333ea' });
+      const doneIdx = years.loan.paidOffIdx;
+      if (plan && doneIdx != null && (none.loan.paidOffIdx == null || doneIdx < none.loan.paidOffIdx) && yearOf(doneIdx) <= endY) {
+        milestones.push({ year: yearOf(doneIdx), label: 'ローン完済', color: '#2563eb' });
+      }
       const marks = new Map();
       for (const m of milestones) marks.set(m.year, marks.has(m.year) ? `${marks.get(m.year)}/${m.label}` : m.label);
 
@@ -817,10 +1013,12 @@
       document.getElementById('rate-scenario-card').style.display = hasLoans ? 'block' : 'none';
       renderSummary(years, retireYear);
       renderLongevity(years, retireYear, pensionYear);
-      renderPrepaySummary(baseline, scenario, prepayYear);
-      renderRateScenario(loans, years, scenarioB, rateDelta, startY);
+      renderBalloonCheck(loans, prepays, startIdx);
+      renderPayoffDetails(years, doPayoff ? prepayYear : null);
+      renderPrepayEffect(none, plan, retireYear, planLabel);
+      renderRateScenario(loans, prepays, years, scenarioB, rateDelta, startIdx);
       renderMatrix(years, hasLoans, hasPnlData, marks);
-      drawChart(baseline, scenario, scenarioB, hasLoans, rateDelta, milestones);
+      drawChart(none, plan, scenarioB, hasLoans, rateDelta, milestones, planLabel);
     }
 
     // ページ上部の結果サマリー
@@ -926,32 +1124,169 @@
         </div>`;
     }
 
-    // 金利A/B の比較表
-    function renderRateScenario(loans, yearsA, scenarioB, rateDelta, startY) {
+    // 符号付きの短縮金額 (+¥123万 / −¥45万)
+    const signYen = (v) => `${v >= 0 ? '+' : '−'}${formatYenShort(Math.abs(v))}`;
+
+    // しわ寄せチェック: ローンごとに最終月の一括返済があるかを調べ、消すのに必要な繰上げ額を逆算する
+    function renderBalloonCheck(loans, prepays, startIdx) {
+      const el = document.getElementById('balloon-check');
+      if (!loans.length) { el.innerHTML = ''; return; }
+      const startYear = yearOf(startIdx);
+
+      el.innerHTML = loans.map(ln => {
+        const spec = loanSpec(ln);
+        const base = expandPrepays(prepays, ln.key);   // すでに入れてある予定は前提にする
+        const r = simulateLoan(spec, startIdx, base);
+        const name = escapeHtml(ln.name);
+
+        if (!r.balloon) {
+          if (!(spec.payment > 0)) {
+            return `<div class="loan-check info">ℹ️ <strong>${name}</strong>: 毎月の返済額が未入力のため「完済まで同額」で計算しています。予定表の返済額を入れると、最終月のしわ寄せを確認できます。</div>`;
+          }
+          const early = r.paidOffIdx != null && r.paidOffIdx < ln.finalIdx
+            ? ` (予定より${durLabel(ln.finalIdx - r.paidOffIdx)}早い)` : '';
+          const raised = ln.five_year_rule && r.lastPayment > r.firstPayment
+            ? `<div class="hint">5年ルールの見直しで、毎月の返済額は ${formatYen(r.firstPayment)} → ${formatYen(r.lastPayment)} に上がる計算です。</div>` : '';
+          return `<div class="loan-check ok">✅ <strong>${name}</strong>: 最終月のしわ寄せはありません。完済 ${r.paidOffIdx != null ? monthLabel(r.paidOffIdx) : '—'}${early}${raised}</div>`;
+        }
+
+        // 解消案: ① 来年から毎年 ② 今月まとめて ③ 毎月の返済額を上げる
+        const fromY = startYear + 1, toY = yearOf(ln.finalIdx) - 1;
+        const yearlyRows = (amt) => { const a = []; for (let y = fromY; y <= toY; y++) a.push({ year: y, amount: amt, mode: 'shorten' }); return a; };
+        const X = solveYearlyPrepay(spec, startIdx, base, fromY, toY);
+        const lump = solveLumpPrepay(spec, startIdx, base);
+        const saveX = X != null ? r.interest - simulateLoan(spec, startIdx, [...base, ...yearlyRows(X)]).interest : 0;
+        const saveL = lump != null ? r.interest - simulateLoan(spec, startIdx, [...base, { year: startYear, amount: lump, mode: 'shorten' }]).interest : 0;
+        // 毎月の返済額の目安は、予定がない素の状態のときだけ出す (予定があると前提が変わるため)
+        const need = base.length === 0 ? levelPayment(spec.balance, spec.ratePct, ln.finalIdx - startIdx + 1) : null;
+        const more = base.length ? 'さらに' : '';
+
+        return `
+          <div class="loan-check warn">
+            <div>⚠️ <strong>${name}</strong>: ${monthLabel(ln.finalIdx)}に <strong style="color:var(--danger);">${formatYen(r.finalPay)}</strong> の一括返済があります (通常の返済は ${formatYen(r.lastPayment)})</div>
+            <div class="solve-opts">
+              ${X != null ? `
+              <div class="solve-opt">
+                <span>${more}毎年 <strong>${formatYenShort(X)}</strong> 繰上げ (${fromY}〜${toY}年・期間短縮型)<br><small>利息 ${formatYenShort(saveX)} の節約</small></span>
+                <button type="button" class="btn btn-primary btn-sm add-solve" data-key="${ln.key}" data-from="${fromY}" data-to="${toY}" data-amount="${X}">予定に追加</button>
+              </div>` : ''}
+              ${lump != null ? `
+              <div class="solve-opt">
+                <span>${more}${monthLabel(startIdx)}に <strong>${formatYenShort(lump)}</strong> をまとめて繰上げ<br><small>利息 ${formatYenShort(saveL)} の節約</small></span>
+                <button type="button" class="btn btn-ghost btn-sm add-solve" data-key="${ln.key}" data-from="${startYear}" data-to="" data-amount="${lump}">予定に追加</button>
+              </div>` : ''}
+              ${need ? `
+              <div class="solve-opt">
+                <span>または毎月の返済額を <strong>${formatYen(need)}</strong> にする (今より +${formatYen(need - spec.payment)})</span>
+              </div>` : ''}
+            </div>
+            ${!ln.five_year_rule ? '<div class="hint">5年ルールの契約なら、次の見直しで返済額が上がってしわ寄せが消える場合があります。ローン表の「5年ルール」にチェックを入れて、次回見直し月を入れると確認できます。</div>' : ''}
+          </div>`;
+      }).join('');
+
+      el.querySelectorAll('.add-solve').forEach(b => b.addEventListener('click', () => {
+        addPrepayRow({
+          key: b.dataset.key, from: +b.dataset.from, to: b.dataset.to ? +b.dataset.to : null,
+          amount: +b.dataset.amount, mode: 'shorten',
+        });
+        recompute();
+        toast('繰上げ返済の予定に追加しました', 'success');
+      }));
+    }
+
+    // 一括返済の額と原資の内訳
+    function renderPayoffDetails(years, payoffYear) {
+      const el = document.getElementById('prepay-summary');
+      if (payoffYear == null) { el.style.display = 'none'; return; }
+      const row = years.find(d => d.y === payoffYear);
+      el.style.display = 'block';
+      if (!row || !(row.prepayAmount > 0)) {
+        el.innerHTML = `<span style="color:var(--text-muted);">${payoffYear}年の時点でローンは返し終わっています。</span>`;
+        return;
+      }
+      el.innerHTML = `
+        <div class="kv"><span>${payoffYear}年に一括返済する額</span><strong>${formatYen(row.prepayAmount)}</strong></div>
+        <div class="kv"><span>└ 内訳</span><span>現預金 ${formatYenShort(row.prepayFromCash)} / 運用取り崩し ${formatYenShort(row.prepayFromInvest)}</span></div>`;
+    }
+
+    // 繰上げなし vs あり の比較表
+    function renderPrepayEffect(none, plan, retireYear, planLabel) {
+      const el = document.getElementById('prepay-effect');
+      if (!plan) { el.style.display = 'none'; return; }
+      const a = none.loan, b = plan.loan;
+      const lastA = none[none.length - 1], lastB = plan[plan.length - 1];
+      const rA = retireYear != null ? none.find(d => d.y === retireYear) : null;
+      const rB = retireYear != null ? plan.find(d => d.y === retireYear) : null;
+      const done = (idx) => idx != null ? monthLabel(idx) : '期間内に終わらず';
+      const balloon = (v) => v > 0 ? `<span style="color:var(--danger);">${formatYen(v)}</span>` : 'なし';
+      const saved = a.interestTotal - b.interestTotal;
+      const diffNet = lastB.netWorth - lastA.netWorth;
+      const earlier = (a.paidOffIdx != null && b.paidOffIdx != null && b.paidOffIdx < a.paidOffIdx)
+        ? `${durLabel(a.paidOffIdx - b.paidOffIdx)}早い` : '—';
+      // 繰上げの資金が足りず、繰上げなしでは起きない現預金マイナスが退職前に出る年
+      const short = plan.find((d, i) => d.cash < 0 && none[i].cash >= 0 && (retireYear == null || d.y < retireYear));
+
+      const notes = [];
+      notes.push(diffNet >= 0
+        ? `繰上げをしたほうが、${lastA.y}年の純資産は <strong>${formatYenShort(diffNet)}</strong> 多くなります。`
+        : `${lastA.y}年の純資産は、繰上げをしないほうが <strong>${formatYenShort(-diffNet)}</strong> 多い結果です(運用利回り ${escapeHtml(document.getElementById('lp-rate').value)}% がローン金利を上回るため)。`);
+      if (a.balloonTotal > 0 && b.balloonTotal < a.balloonTotal) {
+        notes.push(b.balloonTotal > 0
+          ? `最終回の一括返済は ${formatYenShort(a.balloonTotal)} → ${formatYenShort(b.balloonTotal)} に減ります。`
+          : `最終回の一括返済 ${formatYenShort(a.balloonTotal)} はなくなり、完済前の資金繰りの心配が消えます。`);
+      }
+
+      el.style.display = 'block';
+      el.innerHTML = `
+        <h4 style="margin:0 0 0.5rem; font-size:0.95rem;">繰上げ返済の効果</h4>
+        <div class="table-wrap">
+          <table class="table" style="font-size:0.85rem;">
+            <thead><tr><th></th><th class="num">繰上げなし</th><th class="num">${escapeHtml(planLabel)}</th><th class="num">差</th></tr></thead>
+            <tbody>
+              <tr><td>利息の総額</td><td class="num">${formatYen(a.interestTotal)}</td><td class="num">${formatYen(b.interestTotal)}</td>
+                <td class="num"><span class="card-sub ${saved >= 0 ? 'up' : 'down'}">${saved >= 0 ? '−' : '+'}${formatYen(Math.abs(saved))}</span></td></tr>
+              <tr><td>完済</td><td class="num">${done(a.paidOffIdx)}</td><td class="num">${done(b.paidOffIdx)}</td><td class="num">${earlier}</td></tr>
+              <tr><td>最終回の一括返済</td><td class="num">${balloon(a.balloonTotal)}</td><td class="num">${balloon(b.balloonTotal)}</td><td class="num">—</td></tr>
+              <tr><td>繰上げに使うお金</td><td class="num">—</td><td class="num">${formatYen(b.prepaidTotal)}</td><td class="num">—</td></tr>
+              ${rA && rB ? `<tr><td>退職時(${retireYear}年)の資産</td><td class="num">${formatYenShort(rA.endA)}</td><td class="num">${formatYenShort(rB.endA)}</td><td class="num">${signYen(rB.endA - rA.endA)}</td></tr>` : ''}
+              <tr class="emphasis"><td><strong>${lastA.y}年の純資産</strong></td><td class="num">${formatYenShort(lastA.netWorth)}</td><td class="num">${formatYenShort(lastB.netWorth)}</td>
+                <td class="num"><strong class="card-sub ${diffNet >= 0 ? 'up' : 'down'}">${signYen(diffNet)}</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="font-size:0.82rem; color:var(--text-muted); margin-top:0.4rem; display:grid; gap:0.2rem;">
+          ${notes.map(n => `<div>${n}</div>`).join('')}
+          ${short ? `<div style="color:var(--danger);">⚠️ ${short.y}年に現預金がマイナスになります。繰上げの資金が足りていません。</div>` : ''}
+        </div>`;
+    }
+
+    // 金利A/B の比較表 (ローン単体の計算。繰上げの予定は A・B とも同じ)
+    function renderRateScenario(loans, prepays, yearsA, scenarioB, rateDelta, startIdx) {
       const el = document.getElementById('rate-scenario-table');
       if (!scenarioB || rateDelta == null) { el.style.display = 'none'; return; }
 
       const sign = rateDelta >= 0 ? '+' : '';
-      // ローンごとの A / B 比較
       const rows = loans.map(ln => {
-        const rateA = ln.interest_rate || 0;
-        const rateB = Math.max(0, rateA + rateDelta);
-        const a = loanTotals(ln.current_balance, rateA, startY, ln.completeYear);
-        const b = loanTotals(ln.current_balance, rateB, startY, ln.completeYear);
-        const name = ln.member_id
-          ? (members.find(m => m.id === ln.member_id)?.name ?? 'ローン')
-          : (ln.label || 'ローン');
-        return { name, rateA, rateB, a, b };
+        const pp = expandPrepays(prepays, ln.key);
+        return {
+          name: ln.name,
+          rateA: ln.interest_rate || 0,
+          rateB: Math.max(0, (ln.interest_rate || 0) + rateDelta),
+          a: simulateLoan(loanSpec(ln, 0), startIdx, pp),
+          b: simulateLoan(loanSpec(ln, rateDelta), startIdx, pp),
+          fixed: ln.monthly_payment > 0,
+        };
       });
-      const sumA = rows.reduce((s, r) => s + r.a.interest, 0);
-      const sumB = rows.reduce((s, r) => s + r.b.interest, 0);
-      const sumPayA = rows.reduce((s, r) => s + r.a.pay, 0);
-      const sumPayB = rows.reduce((s, r) => s + r.b.pay, 0);
+      const sum = (f) => rows.reduce((s, r) => s + f(r), 0);
+      const intA = sum(r => r.a.interest), intB = sum(r => r.b.interest);
+      const payA = sum(r => r.a.firstPayment), payB = sum(r => r.b.firstPayment);
+      const balloonCell = (x) => x.balloon ? `<span style="color:var(--danger);">${formatYenShort(x.finalPay)}</span>` : 'なし';
+      const plus = (v) => `${v >= 0 ? '+' : ''}${formatYen(v)}`;
 
-      // 最終年の純資産の差
       const lastA = yearsA[yearsA.length - 1];
       const lastB = scenarioB[scenarioB.length - 1];
       const netDiff = lastB.netWorth - lastA.netWorth;
+      const anyFixed = rows.some(r => r.fixed);
 
       el.style.display = 'block';
       el.innerHTML = `
@@ -960,30 +1295,30 @@
             <thead>
               <tr>
                 <th>ローン</th>
-                <th class="num">金利A</th>
-                <th class="num">金利B</th>
-                <th class="num">年間返済 A→B</th>
+                <th class="num">金利 A→B</th>
+                <th class="num">毎月の返済 A→B</th>
+                <th class="num">最終回の一括 A→B</th>
                 <th class="num">利息総額 A→B</th>
-                <th class="num">差額</th>
+                <th class="num">利息の差</th>
               </tr>
             </thead>
             <tbody>
               ${rows.map(r => `
                 <tr>
                   <td>${escapeHtml(r.name)}</td>
-                  <td class="num">${r.rateA}%</td>
-                  <td class="num"><strong>${r.rateB.toFixed(2)}%</strong></td>
-                  <td class="num">${formatYenShort(r.a.pay)} → ${formatYenShort(r.b.pay)}</td>
+                  <td class="num">${r.rateA}% → <strong>${r.rateB.toFixed(2)}%</strong></td>
+                  <td class="num">${formatYen(r.a.firstPayment)} → ${formatYen(r.b.firstPayment)}</td>
+                  <td class="num">${balloonCell(r.a)} → ${balloonCell(r.b)}</td>
                   <td class="num">${formatYenShort(r.a.interest)} → ${formatYenShort(r.b.interest)}</td>
-                  <td class="num"><span class="card-sub down">+${formatYen(r.b.interest - r.a.interest)}</span></td>
+                  <td class="num"><span class="card-sub down">${plus(r.b.interest - r.a.interest)}</span></td>
                 </tr>`).join('')}
               <tr class="emphasis" style="background:#f8fafc;">
                 <td><strong>合計</strong></td>
-                <td class="num">—</td>
                 <td class="num">${sign}${rateDelta}pt</td>
-                <td class="num">${formatYenShort(sumPayA)} → ${formatYenShort(sumPayB)}<br><span style="font-size:0.75rem;color:var(--text-muted);">(年 +${formatYen(sumPayB - sumPayA)})</span></td>
-                <td class="num">${formatYenShort(sumA)} → ${formatYenShort(sumB)}</td>
-                <td class="num"><strong class="card-sub down">+${formatYen(sumB - sumA)}</strong></td>
+                <td class="num">${formatYen(payA)} → ${formatYen(payB)}</td>
+                <td class="num">—</td>
+                <td class="num">${formatYenShort(intA)} → ${formatYenShort(intB)}</td>
+                <td class="num"><strong class="card-sub down">${plus(intB - intA)}</strong></td>
               </tr>
             </tbody>
           </table>
@@ -995,59 +1330,10 @@
           </strong>
         </div>
         <div style="font-size:0.82rem; color:var(--text-muted); margin-top:0.25rem;">
-          金利が${sign}${rateDelta}pt動くと、利息総額は <strong>${formatYen(sumB - sumA)}</strong> 増え、
-          毎年の返済は <strong>${formatYen(sumPayB - sumPayA)}</strong> 増えます。
-        </div>`;
-    }
-
-    // 早期返済の効果サマリー
-    function renderPrepaySummary(baseline, scenario, prepayYear) {
-      const el = document.getElementById('prepay-summary');
-      if (!scenario) { el.style.display = 'none'; return; }
-
-      const pay = scenario.find(d => d.y === prepayYear);
-      const lastS = scenario[scenario.length - 1];
-      const lastB = baseline[baseline.length - 1];
-      const diff = lastS.netWorth - lastB.netWorth;
-
-      // 返済後に純資産が追いつく年 (早期返済が有利に転じる年)
-      let breakEven = null;
-      for (let i = 0; i < scenario.length; i++) {
-        if (scenario[i].y >= prepayYear && scenario[i].netWorth >= baseline[i].netWorth) { breakEven = scenario[i].y; break; }
-      }
-
-      // 利息の節約額 = 支払う利息の総額の差 (元本は返済方法によらず同額なので利息だけを比較)
-      const intB = baseline.reduce((s, d) => s + (d.loanInterest || 0), 0);
-      const intS = scenario.reduce((s, d) => s + (d.loanInterest || 0), 0);
-      const saved = intB - intS;
-
-      el.style.display = 'block';
-      el.innerHTML = `
-        <div style="display:grid; gap:0.4rem;">
-          <div style="display:flex; justify-content:space-between; gap:0.5rem;">
-            <span style="color:var(--text-muted);">${prepayYear}年に一括返済する額</span>
-            <strong style="font-variant-numeric:tabular-nums;">${formatYen(pay?.prepayAmount ?? 0)}</strong>
-          </div>
-          <div style="display:flex; justify-content:space-between; gap:0.5rem;">
-            <span style="color:var(--text-muted);">└ 内訳</span>
-            <span style="font-variant-numeric:tabular-nums;">現預金 ${formatYenShort(pay?.prepayFromCash ?? 0)} / 運用取り崩し ${formatYenShort(pay?.prepayFromInvest ?? 0)}</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; gap:0.5rem;">
-            <span style="color:var(--text-muted);">利息の節約額</span>
-            <span class="card-sub up" style="font-weight:600; font-variant-numeric:tabular-nums;">${saved >= 0 ? '+' : ''}${formatYen(saved)}</span>
-          </div>
-          <hr style="border:none; border-top:1px solid var(--border); margin:0.25rem 0;">
-          <div style="display:flex; justify-content:space-between; gap:0.5rem;">
-            <span>${lastS.y}年時点の純資産の差</span>
-            <strong class="${diff >= 0 ? 'card-sub up' : 'card-sub down'}" style="font-size:1rem; font-variant-numeric:tabular-nums;">
-              ${diff >= 0 ? '+' : ''}${formatYen(diff)}
-            </strong>
-          </div>
-          <div style="font-size:0.82rem; color:var(--text-muted);">
-            ${diff >= 0
-              ? `早期返済したほうが最終的に有利です${breakEven ? ` (${breakEven}年に追いつきます)` : ''}。`
-              : `運用を続けたほうが最終的に有利という結果です (利回り ${document.getElementById('lp-rate').value}% がローン金利を上回るため)。`}
-          </div>
+          金利が${sign}${rateDelta}pt動くと、利息総額は <strong>${plus(intB - intA)}</strong> 変わります。
+          ${anyFixed
+            ? '毎月の返済額を入れたローンは返済額がそのままなので、増えた利息のぶん元金が減らず、最終月の一括返済が大きくなります(5年ルールありなら見直しで返済額が上がります)。'
+            : `毎月の返済は <strong>${plus(payB - payA)}</strong> 変わります。`}
         </div>`;
     }
 
@@ -1085,6 +1371,12 @@
       rows.push(`<tr><th class="row-head">支出</th>${years.map(d => `<td>${man(d.exp)}</td>`).join('')}</tr>`);
       if (hasLoans) {
         rows.push(`<tr><th class="row-head">ローン返済</th>${years.map(d => `<td>${d.loanPay > 0 ? '-' + man(d.loanPay) : '—'}</td>`).join('')}</tr>`);
+        if (years.some(d => (d.balloonPay ?? 0) > 0)) {
+          rows.push(`<tr><th class="row-head" style="padding-left:1.2rem;">└ うち最終回一括</th>${years.map(d => `<td${(d.balloonPay ?? 0) > 0 ? ' class="neg"' : ''}>${(d.balloonPay ?? 0) > 0 ? '-' + man(d.balloonPay) : '—'}</td>`).join('')}</tr>`);
+        }
+      }
+      if (years.some(d => (d.partialPrepay ?? 0) > 0)) {
+        rows.push(`<tr><th class="row-head">繰上げ返済</th>${years.map(d => `<td${(d.partialPrepay ?? 0) > 0 ? ' class="neg"' : ''}>${(d.partialPrepay ?? 0) > 0 ? '-' + man(d.partialPrepay) : '—'}</td>`).join('')}</tr>`);
       }
       if (years.some(d => (d.prepayAmount ?? 0) > 0)) {
         rows.push(`<tr class="emphasis"><th class="row-head">一括返済</th>${years.map(d => `<td${(d.prepayAmount ?? 0) > 0 ? ' class="neg"' : ''}>${(d.prepayAmount ?? 0) > 0 ? '-' + man(d.prepayAmount) : '—'}</td>`).join('')}</tr>`);
@@ -1138,16 +1430,16 @@
       },
     };
 
-    function drawChart(baseline, scenario, scenarioB, hasLoans, rateDelta, milestones = []) {
+    function drawChart(none, plan, scenarioB, hasLoans, rateDelta, milestones = [], planLabel = '繰上げあり') {
       const ctx = document.getElementById('lp-chart').getContext('2d');
-      const labels = baseline.map(d => String(d.y));
+      const labels = none.map(d => String(d.y));
       const datasets = [];
-      const main = scenario ?? baseline;   // 早期返済の設定があればそちらが主役
+      const main = plan ?? none;   // 繰上げの予定があればそちらが主役
 
       if (scenarioB) {
         // 金利A/Bの比較 (純資産ベース)
         datasets.push({
-          label: `金利A${scenario ? ' (早期返済あり)' : ''}`, data: main.map(d => d.netWorth),
+          label: `金利A${plan ? ` (${planLabel})` : ''}`, data: main.map(d => d.netWorth),
           borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.12)',
           fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2,
         });
@@ -1156,35 +1448,35 @@
           borderColor: '#f59e0b', backgroundColor: 'transparent',
           fill: false, tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2,
         });
-        if (scenario) {
+        if (plan) {
           datasets.push({
-            label: '早期返済しない (金利A)', data: baseline.map(d => d.netWorth),
+            label: '繰上げなし (金利A)', data: none.map(d => d.netWorth),
             borderColor: '#94a3b8', backgroundColor: 'transparent', borderDash: [5, 4],
             fill: false, tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 1.5,
           });
         }
-      } else if (scenario) {
-        // 早期返済の比較: 純資産(ローン差引)で2本を並べる
+      } else if (plan) {
+        // 繰上げあり vs なし (純資産 = ローン差引で比べる)
         datasets.push({
-          label: '早期返済する', data: scenario.map(d => d.netWorth),
+          label: planLabel, data: plan.map(d => d.netWorth),
           borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.12)',
           fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2,
         });
         datasets.push({
-          label: '早期返済しない', data: baseline.map(d => d.netWorth),
+          label: '繰上げなし', data: none.map(d => d.netWorth),
           borderColor: '#94a3b8', backgroundColor: 'transparent', borderDash: [5, 4],
           fill: false, tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2,
         });
       } else {
         datasets.push({
           label: hasLoans ? '金融資産' : '年末資産(予測)',
-          data: baseline.map(d => d.endA),
+          data: none.map(d => d.endA),
           borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.12)',
           fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
         });
         if (hasLoans) {
           datasets.push({
-            label: '純資産(ローン差引)', data: baseline.map(d => d.netWorth),
+            label: '純資産(ローン差引)', data: none.map(d => d.netWorth),
             borderColor: '#8b5cf6', backgroundColor: 'transparent',
             fill: false, tension: 0.2, pointRadius: 0, pointHoverRadius: 4,
           });
@@ -1314,6 +1606,13 @@
             const v = document.getElementById('lp-withdrawal').value.trim();
             return v === '' ? null : (parseFloat(v) || 0);
           })(),
+          // 繰上げ返済の予定。loan は保存するローンの並び順 (0始まり)
+          loan_prepayments: (() => {
+            const keys = collectLoans().map(l => l.key);
+            return collectPrepays()
+              .map(p => ({ loan: keys.indexOf(p.key), from: p.from, to: p.to, amount: p.amount, mode: p.mode }))
+              .filter(p => p.loan >= 0);
+          })(),
         });
         const events = collectEvents();
         const rows = [];
@@ -1322,12 +1621,13 @@
           rows.push({ year, income: ev.income ?? null, expense: ev.expense ?? null, note: ev.note ?? null });
         }
         await replaceLifePlanYears(rows);
-        // ローン
-        const loans = collectLoans().map(l => ({
-          member_id: l.member_id, current_balance: l.current_balance,
-          interest_rate: l.interest_rate, start_year: l.start_year, term_years: l.term_years,
-        }));
-        await replaceLifePlanLoans(loans);
+        // ローン (残高が入っているものを画面の並び順で)
+        await replaceLifePlanLoans(collectLoans().map(l => ({
+          member_id: l.member_id, current_balance: l.current_balance, interest_rate: l.interest_rate,
+          start_year: l.start_year, term_years: l.term_years,
+          final_month: l.final_month, monthly_payment: l.monthly_payment,
+          five_year_rule: l.five_year_rule, next_review_month: l.next_review_month,
+        })));
         toast('保存しました', 'success');
       } finally {
         btn.disabled = false; btn.innerHTML = '💾 保存';

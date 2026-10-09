@@ -712,3 +712,46 @@ input[type="number"] {
   .stacked-mobile td .pnl-wrap .pnl-input { font-size: 16px; }  /* iOS ズーム防止 */
   .pnl-sign { width: 36px; height: 36px; font-size: 1.1rem; }
 }
+
+/* ライフプラン: 住宅ローンのしわ寄せチェック */
+.loan-check {
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 0.7rem 0.85rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.88rem;
+}
+.loan-check.warn { background: #fef2f2; border-color: #fecaca; }
+.loan-check.ok   { background: #f0fdf4; border-color: #bbf7d0; }
+.loan-check.info { background: var(--bg); }
+.loan-check .solve-opts { display: grid; gap: 0.4rem; margin-top: 0.55rem; }
+.loan-check .solve-opt {
+  display: flex; justify-content: space-between; align-items: center; gap: 0.6rem;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 0.5rem;
+  padding: 0.5rem 0.65rem;
+}
+.loan-check .solve-opt small { color: var(--text-muted); }
+.loan-check .solve-opt .btn { flex-shrink: 0; }
+.loan-check .hint { margin-top: 0.5rem; font-size: 0.78rem; color: var(--text-muted); }
+.kv { display: flex; justify-content: space-between; gap: 0.5rem; font-variant-numeric: tabular-nums; }
+.kv > span:first-child { color: var(--text-muted); }
+/* ローン表の「5年ルール」セル: チェックの下に次回見直し月 */
+.five-cell { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.five-chk { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; white-space: nowrap; cursor: pointer; }
+@media (max-width: 767px) {
+  .stacked-mobile td .five-cell { width: 60%; min-width: 140px; align-items: flex-end; }
+  .stacked-mobile td .five-cell .form-input { width: 100%; max-width: 100% !important; min-width: 0; }
+}
+/* PC: ローン表・繰上げ表の入力が潰れて数字が途切れないよう最小幅を確保 (狭ければ表ごと横スクロール) */
+@media (min-width: 768px) {
+  .loan-row .ln-bal, .pp-row .pp-amount { min-width: 130px; }
+  .loan-row .ln-rate { min-width: 80px; }
+  .loan-row .ln-monthly { min-width: 110px; }
+  .loan-row .ln-final, .loan-row .ln-review { min-width: 150px; }
+  .pp-row .pp-from, .pp-row .pp-to { min-width: 90px; }
+}
+.ln-final-pay .sub { display: block; font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+/* スマホのカード表示: 数字列(.num)の右寄せがラベルにまで効いて字下げに見えるのを防ぐ */
+@media (max-width: 767px) {
+  .stacked-mobile td[data-label]::before { text-align: left; }
+}

@@ -33,7 +33,7 @@ money/
 1. https://supabase.com/dashboard で対象プロジェクトを開く
 2. 左メニュー **SQL Editor** → **New query**
 3. `supabase/migrations/` の中身を **0001 から順番に** コピーして貼り付け → **Run**
-   (`0001_initial.sql` → `0002...` → … → `0012_data_api_grants.sql`)
+   (`0001_initial.sql` → `0002...` → … → 番号がいちばん大きいファイルまで)
 4. 各ファイルで「Success. No rows returned」が出ればOK
 5. 左メニュー **Table Editor** で12テーブルが作成されていることを確認
 
