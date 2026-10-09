@@ -81,12 +81,17 @@
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-base-income">年間収入 (円/年)</label>
             <input type="number" id="lp-base-income" class="form-input yen-input" inputmode="numeric">
-            <p class="form-help" id="lp-income-help">毎年の収入の目安(手取り)</p>
+            <p class="form-help" id="lp-income-help">今の手取り(ボーナス・共働きの収入も含めた世帯の合計)</p>
           </div>
           <div class="form-group" style="margin:0;">
-            <label class="form-label" for="lp-base-expense">年間支出 (円/年)</label>
+            <label class="form-label" for="lp-income-growth">昇給率 (%/年)</label>
+            <input type="number" id="lp-income-growth" class="form-input" step="0.1" inputmode="decimal" placeholder="例: 1.5">
+            <p class="form-help" id="lp-income-growth-help">退職するまで、年間収入が毎年この率で増える想定</p>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-base-expense">年間の生活費 (円/年)</label>
             <input type="number" id="lp-base-expense" class="form-input yen-input" inputmode="numeric">
-            <p class="form-help">毎年の支出の目安(ローン返済・積立は含めない)</p>
+            <p class="form-help"><strong>住宅ローン返済と積立は含めない</strong>(どちらも下の欄で別に計算します。含めると二重に引かれます)</p>
           </div>
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-rate">想定利回り (%)</label>
@@ -101,7 +106,8 @@
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-contrib">毎月の積立額 (円/月)</label>
             <input type="number" id="lp-contrib" class="form-input" inputmode="numeric" placeholder="例: 100000">
-            <p class="form-help" id="lp-contrib-help">運用資産に毎月積み立てる額(現預金からは引かれません)</p>
+            <label class="inline-chk"><input type="checkbox" id="lp-contrib-cash"> 現預金から払う(クレカ積立・給与天引きなど)</label>
+            <p class="form-help" id="lp-contrib-help">運用資産に毎月積み立てる額</p>
           </div>
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-contrib-end">積立の終了年</label>
@@ -159,6 +165,11 @@
             <p class="form-help" id="lp-retire-help">この年以降、年間収入は0になります</p>
           </div>
           <div class="form-group" style="margin:0;">
+            <label class="form-label" for="lp-retire-expense">退職後の生活費 (円/年・今の金額)</label>
+            <input type="number" id="lp-retire-expense" class="form-input yen-input" inputmode="numeric" placeholder="空欄=現役時代と同じ">
+            <p class="form-help" id="lp-retire-expense-help">退職年からの生活費。今の物価での金額を入れると、インフレ率で毎年増やして計算します</p>
+          </div>
+          <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-retire-lump">退職金 (円)</label>
             <input type="number" id="lp-retire-lump" class="form-input yen-input" inputmode="numeric" placeholder="例: 20000000">
             <p class="form-help">退職年に現預金へ加算されます</p>
@@ -179,6 +190,10 @@
             <p class="form-help">退職年以降、不足分を運用資産から取り崩します。年初の運用資産のこの割合が上限(4%ルールなど)。空欄なら上限なし</p>
           </div>
         </div>
+        <p style="color: var(--text-muted); font-size: 0.78rem; margin: 0.75rem 0 0;">
+          参考(いずれも夫婦2人・今の価値): 夫婦とも65歳以上の無職世帯が実際に使っている額は月約26.4万円(総務省「家計調査」2025年平均)。
+          老後に必要と考える生活費は、最低で月23.9万円・ゆとりを含めて月39.1万円(生命保険文化センター 2025年度調査)。このほか税・社会保険料が月3万円ほどかかります。
+        </p>
         <div id="longevity-summary" style="display:none; margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px dashed var(--border); font-size: 0.9rem;"></div>
       </div>
 
@@ -191,9 +206,10 @@
         <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
           銀行の<strong>返済予定表</strong>から写してください。ペアローンは2件登録します。<br>
           ・現在残高 = 直近に返済した月の「返済後残高」/ 最終返済月 = 予定表の最後の月<br>
-          ・毎月の返済額を入れると予定表どおりに計算し、返しきれない分は最終月の一括返済になります(空欄なら完済まで同額で自動計算)<br>
+          ・毎月の返済額と「返済額の見直し」を契約に合わせると、銀行と同じ計算になります。見直しなしで返しきれない分は最終月の一括返済になります(返済額を空欄にすると、完済まで同額で自動計算)<br>
+          ・金利が変わることが決まっていれば「金利の変更予定」に、変わる月と新しい金利を入れてください<br>
           ・<span id="loan-start-note"></span><br>
-          <span style="color: var(--warning);">※ 上の「年間支出」にローン返済を含めている場合は二重計上になります。含めない金額にしてください。</span>
+          <span style="color: var(--warning);">※ 上の「年間の生活費」にローン返済を含めている場合は二重計上になります。含めない金額にしてください。</span>
         </p>
         <div class="table-wrap" id="loans-wrap" style="display:none;">
           <table class="table stacked-mobile">
@@ -204,7 +220,8 @@
                 <th class="num">金利(%)</th>
                 <th class="num">最終返済月</th>
                 <th class="num">毎月の返済額</th>
-                <th>5年ルール</th>
+                <th>返済額の見直し</th>
+                <th>金利の変更予定</th>
                 <th class="num">最終回の支払</th>
                 <th class="num">利息総額</th>
                 <th style="width:40px;"></th>
@@ -214,7 +231,7 @@
           </table>
         </div>
         <p id="loans-calc-note" style="display:none; color: var(--text-muted); font-size: 0.78rem; margin: 0.4rem 0 0;">
-          右の2列は、繰上げ返済をしない場合(予定表どおり)の値です。5年ルールありは、次回見直し月(以後5年ごと)に返済額を見直し、上げ幅は直前の125%までで計算します。
+          右の2列は、繰上げ返済をしない場合の値です。返済額の見直しは「次回の見直し月」から、半年ごと(上限なし)または5年ごと(上げ幅は直前の125%まで)に、残りの回数で完済できる額へ計算し直します。
         </p>
         <div id="loans-empty" style="color: var(--text-muted); font-size: 0.9rem; padding: 0.5rem 0;">
           住宅ローンはまだありません。「＋ 追加」で登録できます。
@@ -363,7 +380,7 @@
         ? `<div class="empty-state" style="max-width:520px;margin:0 auto;">
              <h3>データベースの準備が必要です</h3>
              <p style="margin:0.5rem 0;">ライフプラン用のテーブルがまだ作成されていません。<br>
-             Supabase の SQL Editor で <code>0006</code>〜<code>0013</code> のマイグレーション(<code>supabase/migrations/</code>)を実行してください。</p>
+             Supabase の SQL Editor で <code>0006</code>〜<code>0014</code> のマイグレーション(<code>supabase/migrations/</code>)を実行してください。</p>
              <button class="btn btn-primary btn-sm" onclick="location.reload()">実行したら再読み込み</button>
            </div>`
         : `<div class="empty-state" style="max-width:520px;margin:0 auto;">
@@ -461,6 +478,9 @@
     document.getElementById('lp-pension-year').value = S.pension_start_year ?? '';
     document.getElementById('lp-pension-annual').value = S.pension_annual ?? '';
     document.getElementById('lp-withdrawal').value = S.withdrawal_rate ?? '';
+    document.getElementById('lp-income-growth').value = S.income_growth_rate ?? 0;
+    document.getElementById('lp-retire-expense').value = S.retire_expense ?? '';
+    document.getElementById('lp-contrib-cash').checked = !!S.contribution_from_cash;
     attachYenHints();
     if (incomeIsPlaceholder) {
       document.getElementById('lp-income-help').textContent = '⚠️ 収入の実績がないため、仮に支出と同額を入れています。実際の年収を入力してください。';
@@ -562,17 +582,28 @@
       // 旧データの借入年・返済年数は、保存時にそのまま書き戻す
       if (loan.start_year != null) tr.dataset.startYear = loan.start_year;
       if (loan.term_years != null) tr.dataset.termYears = loan.term_years;
-      const five = !!loan.five_year_rule;
+      // 返済額の見直し方式。0014 より前のデータは five_year_rule から判断する
+      const rule = ['none', 'five', 'half'].includes(loan.review_rule) ? loan.review_rule : (loan.five_year_rule ? 'five' : 'none');
       tr.innerHTML = `
         <td data-label="名義"><select class="form-select ln-member" style="min-width:110px;">${memberOptions(loan.member_id)}</select></td>
         <td class="num" data-label="現在残高"><input type="number" inputmode="numeric" class="form-input ln-bal" style="text-align:right; max-width:150px;" value="${loan.current_balance ?? ''}"></td>
         <td class="num" data-label="金利(%)"><input type="number" step="0.001" inputmode="decimal" class="form-input ln-rate" style="text-align:right; max-width:90px;" value="${loan.interest_rate ?? ''}"></td>
         <td class="num" data-label="最終返済月"><input type="month" class="form-input ln-final" style="max-width:170px;${loan.final_derived ? ' border-color: var(--warning);' : ''}" value="${escapeHtml(loan.final_month ?? '')}"${loan.final_derived ? ' title="借入年+返済年数から仮に設定しました。予定表の最終返済月に合わせてください"' : ''}></td>
         <td class="num" data-label="毎月の返済額"><input type="number" inputmode="numeric" class="form-input ln-monthly" style="text-align:right; max-width:150px;" value="${loan.monthly_payment ?? ''}" placeholder="自動"></td>
-        <td data-label="5年ルール">
+        <td data-label="返済額の見直し">
           <div class="five-cell">
-            <label class="five-chk"><input type="checkbox" class="ln-5y"${five ? ' checked' : ''}> あり</label>
-            <input type="month" class="form-input ln-review" title="次回の返済額見直し月 (以後5年ごと)" style="max-width:170px;${five ? '' : ' display:none;'}" value="${escapeHtml(loan.next_review_month ?? '')}">
+            <select class="form-select ln-rule" style="min-width:160px;" title="毎月の返済額を空欄(自動)にしている場合は使いません">
+              <option value="none"${rule === 'none' ? ' selected' : ''}>見直しなし</option>
+              <option value="half"${rule === 'half' ? ' selected' : ''}>半年ごと(上限なし)</option>
+              <option value="five"${rule === 'five' ? ' selected' : ''}>5年ルール(125%まで)</option>
+            </select>
+            <input type="month" class="form-input ln-review" title="次回の返済額見直し月" style="max-width:170px;${rule === 'none' ? ' display:none;' : ''}" value="${escapeHtml(loan.next_review_month ?? '')}">
+          </div>
+        </td>
+        <td data-label="金利の変更予定">
+          <div class="five-cell">
+            <input type="month" class="form-input ln-rchg-month" title="金利が変わる月" style="max-width:170px;" value="${escapeHtml(loan.rate_change_month ?? '')}">
+            <input type="number" step="0.001" inputmode="decimal" class="form-input ln-rchg-rate" placeholder="変更後の金利 %" style="text-align:right; max-width:140px;" value="${loan.rate_after ?? ''}">
           </div>
         </td>
         <td class="num" data-label="最終回の支払"><span class="ln-final-pay">—</span></td>
@@ -582,8 +613,8 @@
       tr.querySelector('.ln-del').addEventListener('click', () => {
         tr.remove(); refreshLoansVisibility(); refreshPrepayTargets(); recompute();
       });
-      tr.querySelector('.ln-5y').addEventListener('change', (e) => {
-        tr.querySelector('.ln-review').style.display = e.target.checked ? '' : 'none';
+      tr.querySelector('.ln-rule').addEventListener('change', (e) => {
+        tr.querySelector('.ln-review').style.display = e.target.value === 'none' ? 'none' : '';
       });
       tr.querySelector('.ln-member').addEventListener('change', refreshPrepayTargets);
       // 金利や残高を変えたら即再計算 (change だけでなく input でも拾う)
@@ -604,6 +635,7 @@
         final_month: l.final_month ?? (derived ? `${l.start_year + l.term_years}-12` : ''),
         final_derived: derived,
         monthly_payment: l.monthly_payment, five_year_rule: l.five_year_rule, next_review_month: l.next_review_month,
+        review_rule: l.review_rule, rate_change_month: l.rate_change_month, rate_after: l.rate_after,
         start_year: l.start_year, term_years: l.term_years,
       });
     }
@@ -618,6 +650,9 @@
         if (bal == null || bal <= 0) return;
         const finalMonth = tr.querySelector('.ln-final').value.trim();
         const review = tr.querySelector('.ln-review').value.trim();
+        const rule = tr.querySelector('.ln-rule').value;
+        const rchgMonth = tr.querySelector('.ln-rchg-month').value.trim();
+        const rchgRate = tr.querySelector('.ln-rchg-rate').value.trim();
         loans.push({
           key: tr.dataset.key,
           name: loanName(tr),
@@ -627,9 +662,13 @@
           final_month: finalMonth || null,
           finalIdx: monthIndex(finalMonth),
           monthly_payment: toInt(tr.querySelector('.ln-monthly').value),
-          five_year_rule: tr.querySelector('.ln-5y').checked,
+          review_rule: rule,
+          five_year_rule: rule === 'five',   // 旧列にも書いておく
           next_review_month: review || null,
           reviewIdx: monthIndex(review),
+          rate_change_month: rchgMonth || null,
+          rateChangeIdx: monthIndex(rchgMonth),
+          rate_after: rchgRate === '' ? null : (parseFloat(rchgRate) || 0),
           start_year: tr.dataset.startYear ? +tr.dataset.startYear : null,
           term_years: tr.dataset.termYears ? +tr.dataset.termYears : null,
           _row: tr,
@@ -644,8 +683,11 @@
       ratePct: Math.max(0, (ln.interest_rate || 0) + rateDelta),
       finalIdx: ln.finalIdx,
       payment: ln.monthly_payment,
-      fiveYear: ln.five_year_rule,
+      rule: ln.review_rule,
       reviewIdx: ln.reviewIdx,
+      // 金利の変更予定 (シナリオBの上乗せは変更後の金利にもかける)
+      rateChangeIdx: (ln.rateChangeIdx != null && ln.rate_after != null) ? ln.rateChangeIdx : null,
+      rateAfter: ln.rate_after != null ? Math.max(0, ln.rate_after + rateDelta) : null,
     });
 
     // ======== 繰上げ返済の予定 ========
@@ -787,6 +829,10 @@
       const pensionAnnual = toInt(document.getElementById('lp-pension-annual').value) ?? 0;
       const wdRaw = document.getElementById('lp-withdrawal').value.trim();
       const withdrawalRate = wdRaw === '' ? null : (parseFloat(wdRaw) || 0) / 100;
+      // 昇給率・退職後の生活費・積立の払い方
+      const incomeGrowth = (parseFloat(document.getElementById('lp-income-growth').value) || 0) / 100;
+      const retireExp = toInt(document.getElementById('lp-retire-expense').value);
+      const contribFromCash = document.getElementById('lp-contrib-cash').checked;
 
       if (endY < startY || endY - startY > 100) { tbody.innerHTML = ''; return; }
 
@@ -845,17 +891,20 @@
           const elapsed = y - startY;
           const infFactor = Math.pow(1 + inflation, elapsed);
 
-          // 支出はインフレで毎年増える (その年を手入力している場合はその額をそのまま使う)
-          const exp = (ev.expense != null) ? ev.expense : Math.round(baseExp * infFactor);
-
-          // 収入: 退職年以降は給与0。年金開始年以降は年金額。手入力があれば最優先。
           const retired = retireYear != null && y >= retireYear;
+
+          // 生活費はインフレで毎年増える。退職後の生活費があれば退職年から切り替える (どちらも今の価値で入力)
+          // その年を手入力している場合はその額をそのまま使う
+          const livingBase = (retired && retireExp != null) ? retireExp : baseExp;
+          const exp = (ev.expense != null) ? ev.expense : Math.round(livingBase * infFactor);
+
+          // 収入: 現役中は昇給率で毎年増える。退職年以降は給与0。年金開始年以降は年金額。手入力があれば最優先。
           const gettingPension = pensionYear != null && y >= pensionYear;
           let inc;
           if (ev.income != null) {
             inc = ev.income;
           } else {
-            inc = retired ? 0 : baseInc;
+            inc = retired ? 0 : Math.round(baseInc * Math.pow(1 + incomeGrowth, elapsed));
             if (gettingPension) inc += pensionAnnual;
           }
 
@@ -906,14 +955,16 @@
           balloonTotal += balloonPay;
           const loanBal = outstanding();
 
-          // 年間収支 (退職金は一時収入として加算)
-          const cf = inc + lumpSum - exp - loanPay;
-
           // 積立: この年に積み立てるか (終了年の指定があればその年まで)
           // 退職後は給与がないため積立も止める
           const contributing = monthlyContrib > 0 && !retired
             && (contribEndYear == null || y <= contribEndYear);
           const monthlyAdd = contributing ? monthlyContrib : 0;
+          // 積立を現預金から払う設定なら、その分も年間収支から出ていく
+          const contribFromCashThisYear = contribFromCash ? monthlyAdd * 12 : 0;
+
+          // 年間収支 (退職金は一時収入として加算)
+          const cf = inc + lumpSum - exp - loanPay - contribFromCashThisYear;
 
           // 運用資産は月次複利で計算 (毎月 利回り/12 で増やし、積立額を足す)
           const investStart = invest;
@@ -957,7 +1008,7 @@
 
           years.push({
             y, age: ageCell(y), inc, exp, loanPay, loanInterest, balloonPay, cf, growth,
-            contribution: contributedThisYear,
+            contribution: contributedThisYear, contribFromCash: contribFromCashThisYear,
             prepayAmount, prepayFromCash, prepayFromInvest, partialPrepay,
             lumpSum, withdrawal, withdrawalCapped, retired,
             cash, invest, investPnl, investPrincipal: invest - investPnl,
@@ -1019,6 +1070,20 @@
       renderRateScenario(loans, prepays, years, scenarioB, rateDelta, startIdx);
       renderMatrix(years, hasLoans, hasPnlData, marks);
       drawChart(none, plan, scenarioB, hasLoans, rateDelta, milestones, planLabel);
+      updatePlanHelps({ startY, retireYear, inflation, incomeGrowth, baseInc, retireExp });
+    }
+
+    // 昇給率・退職後の生活費の注記 (退職年にいくらになるか)
+    function updatePlanHelps({ startY, retireYear, inflation, incomeGrowth, baseInc, retireExp }) {
+      const gHelp = document.getElementById('lp-income-growth-help');
+      const eHelp = document.getElementById('lp-retire-expense-help');
+      const yrs = retireYear != null ? retireYear - startY : null;
+      gHelp.textContent = (incomeGrowth > 0 && yrs != null && yrs > 0 && baseInc > 0)
+        ? `退職の前年(${retireYear - 1}年)には年収 ${formatYenShort(Math.round(baseInc * Math.pow(1 + incomeGrowth, yrs - 1)))} になる計算です`
+        : '退職するまで、年間収入が毎年この率で増える想定';
+      eHelp.textContent = (retireExp != null && retireExp > 0)
+        ? `月 ${formatYenShort(Math.round(retireExp / 12))}。${yrs != null && yrs > 0 ? `インフレで退職年(${retireYear}年)には年 ${formatYenShort(Math.round(retireExp * Math.pow(1 + inflation, yrs)))} 相当` : ''}`
+        : '退職年からの生活費。今の物価での金額を入れると、インフレ率で毎年増やして計算します';
     }
 
     // ページ上部の結果サマリー
@@ -1145,8 +1210,8 @@
           }
           const early = r.paidOffIdx != null && r.paidOffIdx < ln.finalIdx
             ? ` (予定より${durLabel(ln.finalIdx - r.paidOffIdx)}早い)` : '';
-          const raised = ln.five_year_rule && r.lastPayment > r.firstPayment
-            ? `<div class="hint">5年ルールの見直しで、毎月の返済額は ${formatYen(r.firstPayment)} → ${formatYen(r.lastPayment)} に上がる計算です。</div>` : '';
+          const raised = r.lastPayment > r.firstPayment
+            ? `<div class="hint">返済額の見直し・金利の変更で、毎月の返済額は ${formatYen(r.firstPayment)} → ${formatYen(r.lastPayment)} に上がる計算です。</div>` : '';
           return `<div class="loan-check ok">✅ <strong>${name}</strong>: 最終月のしわ寄せはありません。完済 ${r.paidOffIdx != null ? monthLabel(r.paidOffIdx) : '—'}${early}${raised}</div>`;
         }
 
@@ -1180,7 +1245,7 @@
                 <span>または毎月の返済額を <strong>${formatYen(need)}</strong> にする (今より +${formatYen(need - spec.payment)})</span>
               </div>` : ''}
             </div>
-            ${!ln.five_year_rule ? '<div class="hint">5年ルールの契約なら、次の見直しで返済額が上がってしわ寄せが消える場合があります。ローン表の「5年ルール」にチェックを入れて、次回見直し月を入れると確認できます。</div>' : ''}
+            ${ln.review_rule === 'none' ? '<div class="hint">契約で返済額が見直される場合(半年ごと・5年ルールなど)は、ローン表の「返済額の見直し」と次回の見直し月を合わせると、しわ寄せが消えるか確認できます。</div>' : ''}
           </div>`;
       }).join('');
 
@@ -1274,7 +1339,7 @@
           rateB: Math.max(0, (ln.interest_rate || 0) + rateDelta),
           a: simulateLoan(loanSpec(ln, 0), startIdx, pp),
           b: simulateLoan(loanSpec(ln, rateDelta), startIdx, pp),
-          fixed: ln.monthly_payment > 0,
+          fixed: ln.monthly_payment > 0 && ln.review_rule === 'none',
         };
       });
       const sum = (f) => rows.reduce((s, r) => s + f(r), 0);
@@ -1332,7 +1397,7 @@
         <div style="font-size:0.82rem; color:var(--text-muted); margin-top:0.25rem;">
           金利が${sign}${rateDelta}pt動くと、利息総額は <strong>${plus(intB - intA)}</strong> 変わります。
           ${anyFixed
-            ? '毎月の返済額を入れたローンは返済額がそのままなので、増えた利息のぶん元金が減らず、最終月の一括返済が大きくなります(5年ルールありなら見直しで返済額が上がります)。'
+            ? '「見直しなし」で返済額を固定したローンは、増えた利息のぶん元金が減らず、最終月の一括返済が大きくなります。'
             : `毎月の返済は <strong>${plus(payB - payA)}</strong> 変わります。`}
         </div>`;
     }
@@ -1381,8 +1446,13 @@
       if (years.some(d => (d.prepayAmount ?? 0) > 0)) {
         rows.push(`<tr class="emphasis"><th class="row-head">一括返済</th>${years.map(d => `<td${(d.prepayAmount ?? 0) > 0 ? ' class="neg"' : ''}>${(d.prepayAmount ?? 0) > 0 ? '-' + man(d.prepayAmount) : '—'}</td>`).join('')}</tr>`);
       }
+      // 積立を現預金から払う場合は支出側の行として出す (年間収支に含まれる)
+      const cashContrib = years.some(d => (d.contribFromCash ?? 0) > 0);
+      if (cashContrib) {
+        rows.push(`<tr><th class="row-head">積立</th>${years.map(d => `<td>${d.contribFromCash > 0 ? '-' + man(d.contribFromCash) : '—'}</td>`).join('')}</tr>`);
+      }
       rows.push(`<tr><th class="row-head">年間収支</th>${years.map(d => `<td${cls(d.cf)}>${d.cf >= 0 ? '+' : ''}${man(d.cf)}</td>`).join('')}</tr>`);
-      if (years.some(d => d.contribution > 0)) {
+      if (!cashContrib && years.some(d => d.contribution > 0)) {
         rows.push(`<tr><th class="row-head">積立</th>${years.map(d => `<td>${d.contribution > 0 ? '+' + man(d.contribution) : '—'}</td>`).join('')}</tr>`);
       }
       rows.push(`<tr><th class="row-head">運用益</th>${years.map(d => `<td>+${man(d.growth)}</td>`).join('')}</tr>`);
@@ -1510,8 +1580,10 @@
     // 前提の変更で即再計算
     ['lp-start','lp-end','lp-rate','lp-start-cash','lp-start-inv','lp-base-income','lp-base-expense',
      'lp-contrib','lp-contrib-end','lp-prepay-year','lp-prepay-ratio','lp-rate-delta',
-     'lp-inflation','lp-retire-year','lp-retire-lump','lp-pension-year','lp-pension-annual','lp-withdrawal']
+     'lp-inflation','lp-retire-year','lp-retire-lump','lp-pension-year','lp-pension-annual','lp-withdrawal',
+     'lp-income-growth','lp-retire-expense']
       .forEach(id => document.getElementById(id).addEventListener('input', recompute));
+    document.getElementById('lp-contrib-cash').addEventListener('change', recompute);
 
     // インフレ率の効果を注記に出す (20年後の支出がいくら相当になるか)
     function updateInflationHelp() {
@@ -1557,11 +1629,13 @@
     function updateContribHelp() {
       const m = toInt(document.getElementById('lp-contrib').value) ?? 0;
       const help = document.getElementById('lp-contrib-help');
+      const note = document.getElementById('lp-contrib-cash').checked ? '現預金から払う' : '現預金からは引かない';
       help.textContent = m > 0
-        ? `年間 ${formatYen(m * 12)} を運用資産に積立 (現預金からは引かれません)`
-        : '運用資産に毎月積み立てる額(現預金からは引かれません)';
+        ? `年間 ${formatYen(m * 12)} を運用資産に積立 (${note})`
+        : `運用資産に毎月積み立てる額 (${note})`;
     }
     document.getElementById('lp-contrib').addEventListener('input', updateContribHelp);
+    document.getElementById('lp-contrib-cash').addEventListener('change', updateContribHelp);
     updateContribHelp();
 
     // 実績から取り直す
@@ -1613,6 +1687,9 @@
               .map(p => ({ loan: keys.indexOf(p.key), from: p.from, to: p.to, amount: p.amount, mode: p.mode }))
               .filter(p => p.loan >= 0);
           })(),
+          income_growth_rate: parseFloat(document.getElementById('lp-income-growth').value) || 0,
+          retire_expense: toInt(document.getElementById('lp-retire-expense').value),
+          contribution_from_cash: document.getElementById('lp-contrib-cash').checked,
         });
         const events = collectEvents();
         const rows = [];
@@ -1627,6 +1704,7 @@
           start_year: l.start_year, term_years: l.term_years,
           final_month: l.final_month, monthly_payment: l.monthly_payment,
           five_year_rule: l.five_year_rule, next_review_month: l.next_review_month,
+          review_rule: l.review_rule, rate_change_month: l.rate_change_month, rate_after: l.rate_after,
         })));
         toast('保存しました', 'success');
       } finally {

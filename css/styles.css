@@ -740,7 +740,8 @@ input[type="number"] {
 .five-chk { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; white-space: nowrap; cursor: pointer; }
 @media (max-width: 767px) {
   .stacked-mobile td .five-cell { width: 60%; min-width: 140px; align-items: flex-end; }
-  .stacked-mobile td .five-cell .form-input { width: 100%; max-width: 100% !important; min-width: 0; }
+  .stacked-mobile td .five-cell .form-input,
+  .stacked-mobile td .five-cell .form-select { width: 100%; max-width: 100% !important; min-width: 0 !important; }
 }
 /* PC: ローン表・繰上げ表の入力が潰れて数字が途切れないよう最小幅を確保 (狭ければ表ごと横スクロール) */
 @media (min-width: 768px) {
@@ -755,3 +756,5 @@ input[type="number"] {
 @media (max-width: 767px) {
   .stacked-mobile td[data-label]::before { text-align: left; }
 }
+/* 入力欄の下に置く小さなチェック (例: 積立を現預金から払う) */
+.inline-chk { display: flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; margin-top: 0.4rem; cursor: pointer; }

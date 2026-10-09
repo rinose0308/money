@@ -427,7 +427,7 @@ export async function updateHousehold({ householdId, updates }) {
 export async function getLifePlanSettings() {
   const { data, error } = await supabase
     .from('life_plan_settings')
-    .select('household_id, start_year, end_year, base_income, base_expense, return_rate, start_assets, monthly_contribution, contribution_end_year, prepay_year, prepay_cash_ratio, rate_scenario_delta, inflation_rate, retirement_year, retirement_lump_sum, pension_start_year, pension_annual, withdrawal_rate, loan_prepayments')
+    .select('household_id, start_year, end_year, base_income, base_expense, return_rate, start_assets, monthly_contribution, contribution_end_year, prepay_year, prepay_cash_ratio, rate_scenario_delta, inflation_rate, retirement_year, retirement_lump_sum, pension_start_year, pension_annual, withdrawal_rate, loan_prepayments, income_growth_rate, retire_expense, contribution_from_cash')
     .maybeSingle();
   if (error) throw error;
   return data; // null なら未設定
@@ -456,6 +456,9 @@ export async function saveLifePlanSettings(settings) {
     pension_annual: settings.pension_annual ?? null,
     withdrawal_rate: settings.withdrawal_rate ?? null,
     loan_prepayments: settings.loan_prepayments ?? [],
+    income_growth_rate: settings.income_growth_rate ?? 0,
+    retire_expense: settings.retire_expense ?? null,
+    contribution_from_cash: !!settings.contribution_from_cash,
     updated_at: new Date().toISOString(),
   };
   const { data, error } = await supabase
@@ -480,7 +483,7 @@ export async function listLifePlanYears() {
 export async function listLifePlanLoans() {
   const { data, error } = await supabase
     .from('life_plan_loans')
-    .select('id, member_id, label, current_balance, interest_rate, start_year, term_years, final_month, monthly_payment, five_year_rule, next_review_month, display_order')
+    .select('id, member_id, label, current_balance, interest_rate, start_year, term_years, final_month, monthly_payment, five_year_rule, next_review_month, review_rule, rate_change_month, rate_after, display_order')
     .order('display_order', { ascending: true })
     .order('created_at', { ascending: true });
   if (error) throw error;
@@ -488,7 +491,8 @@ export async function listLifePlanLoans() {
 }
 
 // ローンを全置換 (rows: [{member_id, label, current_balance, interest_rate, start_year, term_years,
-//                       final_month, monthly_payment, five_year_rule, next_review_month}])
+//                       final_month, monthly_payment, five_year_rule, next_review_month,
+//                       review_rule, rate_change_month, rate_after}])
 export async function replaceLifePlanLoans(rows) {
   const profile = await getMyProfile();
   if (!profile) throw new Error('プロファイルが見つかりません');
@@ -516,6 +520,9 @@ export async function replaceLifePlanLoans(rows) {
       monthly_payment: r.monthly_payment ?? null,
       five_year_rule: !!r.five_year_rule,
       next_review_month: r.next_review_month ?? null,
+      review_rule: r.review_rule ?? null,
+      rate_change_month: r.rate_change_month ?? null,
+      rate_after: r.rate_after ?? null,
       display_order: idx,
     })))
     .select();

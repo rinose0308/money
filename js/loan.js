@@ -3,7 +3,12 @@
 //  ・利息 = floor(返済前の残高 × 年利 ÷ 12)
 //    (りょちょ・まちょの予定表の 2054年1〜3月の数字と1円単位で一致することを確認済み)
 //  ・毎月の返済額が足りないと、返しきれなかった元金が最終月にまとめて来る (しわ寄せ)
-//  ・5年ルール: 返済額は5年ごとに見直し。上げ幅は直前の返済額の125%まで
+//  ・返済額の見直し (rule):
+//      none = 見直しなし。返済額はそのままで、足りない分は最終月に一括
+//      five = 5年ルール。5年ごとに見直し、上げ幅は直前の返済額の125%まで
+//      half = 半年ごとに見直し、上限なし (5年ルールのない変動金利)
+//    毎月の返済額を空欄にした「自動」は、完済まで同額になる額を計算し、金利が変わればすぐ計算し直す
+//  ・金利の変更予定 (rateChangeIdx から rateAfter%) に対応。見直しのある方式は次の見直しで返済額に反映
 //  ・返済額が利息に届かない月は、不足分が「未払利息」として残り、以後の返済で先に充当される
 //
 // 月は「年×12 + (月−1)」の通し番号 (monthIndex) で扱う。
@@ -30,12 +35,18 @@ export function levelPayment(balance, ratePct, n) {
   return Math.ceil(balance * r / (1 - Math.pow(1 + r, -n)));
 }
 
-// spec: { balance, ratePct, finalIdx, payment (null=自動), fiveYear, reviewIdx }
+// 見直しの間隔 (月)
+const REVIEW_STEP = { five: 60, half: 6 };
+
+// spec: { balance, ratePct, finalIdx, payment (null=自動), rule ('none'|'five'|'half'), reviewIdx,
+//         rateChangeIdx, rateAfter }   ※ 旧形式の fiveYear: true は rule: 'five' とみなす
 // startIdx: この月の返済から計算を始める (balance はその直前の残高)
 export function createLoan(spec, startIdx) {
   const balance = Math.max(0, Math.round(spec.balance || 0));
   const n = spec.finalIdx - startIdx + 1;
   const auto = !(spec.payment > 0);
+  // 自動計算の返済額はもともと完済まで足りるので、定期の見直しはしない (金利変更時だけ計算し直す)
+  const rule = auto ? 'auto' : (spec.rule ?? (spec.fiveYear ? 'five' : 'none'));
   const L = {
     balance,
     unpaid: 0,                         // 未払利息
@@ -43,15 +54,27 @@ export function createLoan(spec, startIdx) {
     finalIdx: spec.finalIdx,
     payment: auto ? levelPayment(balance, spec.ratePct, n) : Math.round(spec.payment),
     auto,
-    fiveYear: !!spec.fiveYear && !auto,   // 自動計算の返済額はもともと完済まで足りるので見直し不要
+    rule,
     reviewIdx: null,
+    rateChange: null,
     done: balance <= 0 || n < 1,
     paidOffIdx: null,
   };
-  if (L.fiveYear) {
-    let r = spec.reviewIdx ?? (startIdx + 60);
-    while (r < startIdx) r += 60;     // 過去の見直し月が入っていたら次の見直しまで進める
+  const step = REVIEW_STEP[rule];
+  if (step) {
+    // 見直し月が未入力なら: 5年ルールは5年後、半年ごとは今月から
+    let r = spec.reviewIdx ?? (rule === 'five' ? startIdx + 60 : startIdx);
+    while (r < startIdx) r += step;   // 過去の見直し月が入っていたら次の見直しまで進める
     L.reviewIdx = r;
+  }
+  if (spec.rateChangeIdx != null && spec.rateAfter != null && spec.rateChangeIdx < spec.finalIdx) {
+    if (spec.rateChangeIdx <= startIdx) {
+      // 変更月がすでに来ている → 最初から新しい金利で計算
+      L.ratePct = Math.max(0, spec.rateAfter);
+      if (auto) L.payment = levelPayment(balance, L.ratePct, n);
+    } else {
+      L.rateChange = { idx: spec.rateChangeIdx, ratePct: Math.max(0, spec.rateAfter) };
+    }
   }
   return L;
 }
@@ -80,6 +103,14 @@ export function prepayLoan(L, amount, mode, idx) {
 //   regular = その月の約定返済額 (しわ寄せの判定に使う)
 export function stepMonth(L, idx) {
   if (L.done) return { pay: 0, interest: 0, final: false, regular: 0 };
+
+  // 金利の変更 (この月の利息から新しい金利)。自動の返済額はその場で計算し直す
+  if (L.rateChange && idx >= L.rateChange.idx) {
+    L.ratePct = L.rateChange.ratePct;
+    L.rateChange = null;
+    if (L.auto) L.payment = levelPayment(L.balance + L.unpaid, L.ratePct, L.finalIdx - idx + 1);
+  }
+
   const interest = Math.floor(L.balance * L.ratePct / 100 / 12);
 
   if (idx >= L.finalIdx) {
@@ -89,11 +120,11 @@ export function stepMonth(L, idx) {
     return { pay, interest, final: true, regular };
   }
 
-  if (L.fiveYear && L.reviewIdx != null && idx >= L.reviewIdx) {
-    // 残り回数で完済できる額に見直す。ただし上げ幅は直前の125%まで (下げは制限なし)
+  if (L.reviewIdx != null && idx >= L.reviewIdx) {
+    // 残り回数で完済できる額に見直す。5年ルールは上げ幅を直前の125%まで (下げは制限なし)
     const fresh = levelPayment(L.balance + L.unpaid, L.ratePct, L.finalIdx - idx + 1);
-    L.payment = Math.min(fresh, Math.floor(L.payment * 1.25));
-    L.reviewIdx += 60;
+    L.payment = L.rule === 'five' ? Math.min(fresh, Math.floor(L.payment * 1.25)) : fresh;
+    L.reviewIdx += REVIEW_STEP[L.rule];
   }
 
   const due = interest + L.unpaid;
