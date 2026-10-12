@@ -758,3 +758,39 @@ input[type="number"] {
 }
 /* 入力欄の下に置く小さなチェック (例: 積立を現預金から払う) */
 .inline-chk { display: flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; margin-top: 0.4rem; cursor: pointer; }
+
+/* ============================================================
+   折りたたみカード (ライフプラン)
+   閉じていても見出しの横に要点 (.collapse-sum) を出す
+   ============================================================ */
+.collapse-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: 0 0 0.6rem; }
+.card.collapsible { padding: 0; margin-bottom: 0.6rem !important; }
+.collapse-head {
+  display: flex; align-items: center; gap: 0.75rem;
+  width: 100%; padding: 0.9rem 1.25rem;
+  background: none; border: 0; border-radius: 0.75rem;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.collapse-head:hover { background: var(--bg); }
+.collapse-head:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.collapse-title { font-weight: 700; font-size: 1rem; white-space: nowrap; }
+.collapse-sum {
+  flex: 1; min-width: 0; text-align: right;
+  font-size: 0.82rem; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.collapse-sum .warn { color: var(--danger); font-weight: 600; }
+.collapse-chev::before { content: '▾'; display: inline-block; color: var(--text-muted); transition: transform 0.15s; }
+.collapsible.collapsed .collapse-chev::before { transform: rotate(-90deg); }
+.collapse-body { padding: 0 1.25rem 1.25rem; }
+.collapse-tools { display: flex; justify-content: flex-end; margin: 0 0 0.4rem; }
+.collapsible.collapsed .collapse-body { display: none; }
+/* 開いているときは中身が見えるので要点は隠す (しわ寄せの警告は中にも出ている) */
+.collapsible:not(.collapsed) .collapse-sum { visibility: hidden; }
+@media (max-width: 639px) {
+  .collapse-head { flex-wrap: wrap; padding: 0.8rem 0.85rem; row-gap: 0.15rem; }
+  .collapse-title { flex: 1; }
+  .collapse-sum { order: 3; flex-basis: 100%; text-align: left; white-space: normal; }
+  .collapsible:not(.collapsed) .collapse-sum { display: none; }
+  .collapse-body { padding: 0 0.85rem 0.9rem; }
+}

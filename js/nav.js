@@ -7,7 +7,6 @@ const links = [
   { href: '/dashboard.html', label: 'ダッシュボード', short: 'ホーム',   icon: '📊' },
   { href: '/monthly.html',   label: '月次入力',       short: '月次入力', icon: '✏️' },
   { href: '/lifeplan.html',  label: 'ライフプラン',   short: 'プラン',   icon: '📈' },
-  { href: '/import.html',    label: '取り込み',       short: 'データ',   icon: '📂' },
   { href: '/settings.html',  label: '設定',           short: '設定',     icon: '⚙️' },
 ];
 

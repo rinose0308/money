@@ -56,9 +56,23 @@
         </div>
       </div>
 
+      <!-- 入力 (各カードは折りたたみ式。閉じていても見出しの横に要点を出す) -->
+      <div class="collapse-toolbar">
+        <h2 class="section-title" style="margin:0;">入力</h2>
+        <div style="display:flex; gap:0.4rem;">
+          <button type="button" class="btn btn-ghost btn-sm" id="expand-all">すべて開く</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="collapse-all">すべて閉じる</button>
+        </div>
+      </div>
+
       <!-- 前提 -->
-      <div class="card" style="margin-bottom: 1rem;">
-        <h3 style="margin: 0 0 0.75rem; font-size: 1rem;">前提</h3>
+      <div class="card collapsible" data-key="assumptions" data-default="closed">
+        <button type="button" class="collapse-head" aria-expanded="true">
+          <span class="collapse-title">前提</span>
+          <span class="collapse-sum" id="csum-assumptions"></span>
+          <span class="collapse-chev" aria-hidden="true"></span>
+        </button>
+        <div class="collapse-body">
         <div class="grid cols-2" style="gap: 0.75rem;">
           <div class="form-group" style="margin:0;">
             <label class="form-label" for="lp-start">開始年</label>
@@ -121,14 +135,18 @@
           </span>
           <button type="button" class="btn btn-ghost btn-sm" id="reset-assets-btn">実績から取り直す</button>
         </div>
+        </div>
       </div>
 
       <!-- 特別な年 (ライフイベント) -->
-      <div class="card" style="margin-bottom: 1rem;">
-        <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.25rem;">
-          <h3 style="margin: 0; font-size: 1rem;">特別な年(ライフイベント)</h3>
-          <button type="button" class="btn btn-ghost btn-sm" id="add-event-btn">＋ 追加</button>
-        </div>
+      <div class="card collapsible" data-key="events" data-default="closed">
+        <button type="button" class="collapse-head" aria-expanded="true">
+          <span class="collapse-title">特別な年(ライフイベント)</span>
+          <span class="collapse-sum" id="csum-events"></span>
+          <span class="collapse-chev" aria-hidden="true"></span>
+        </button>
+        <div class="collapse-body">
+        <div class="collapse-tools"><button type="button" class="btn btn-ghost btn-sm" id="add-event-btn">＋ 追加</button></div>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
           いつもと違う年だけ入力します。空欄の欄は上の「年間収入/支出」がそのまま使われます。<br>
           例: 退職年に収入を年金額に / 子の大学入学年に支出を増やす。
@@ -150,11 +168,17 @@
         <div id="events-empty" style="color: var(--text-muted); font-size: 0.9rem; padding: 0.5rem 0;">
           特別な年はまだありません。「＋ 追加」で登録できます。
         </div>
+        </div>
       </div>
 
       <!-- 退職・年金 -->
-      <div class="card" style="margin-bottom: 1rem;">
-        <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">退職・年金</h3>
+      <div class="card collapsible" data-key="retire" data-default="closed">
+        <button type="button" class="collapse-head" aria-expanded="true">
+          <span class="collapse-title">退職・年金</span>
+          <span class="collapse-sum" id="csum-retire"></span>
+          <span class="collapse-chev" aria-hidden="true"></span>
+        </button>
+        <div class="collapse-body">
         <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
           退職年以降は給与収入が止まり、年金の受給開始年からは年金額が収入になります。老後に資産が持つかを見るための項目です。
         </p>
@@ -195,14 +219,18 @@
           老後に必要と考える生活費は、最低で月23.9万円・ゆとりを含めて月39.1万円(生命保険文化センター 2025年度調査)。このほか税・社会保険料が月3万円ほどかかります。
         </p>
         <div id="longevity-summary" style="display:none; margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px dashed var(--border); font-size: 0.9rem;"></div>
+        </div>
       </div>
 
       <!-- 住宅ローン -->
-      <div class="card" style="margin-bottom: 1rem;">
-        <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.25rem;">
-          <h3 style="margin: 0; font-size: 1rem;">住宅ローン</h3>
-          <button type="button" class="btn btn-ghost btn-sm" id="add-loan-btn">＋ 追加</button>
-        </div>
+      <div class="card collapsible" data-key="loans" data-default="closed">
+        <button type="button" class="collapse-head" aria-expanded="true">
+          <span class="collapse-title">住宅ローン</span>
+          <span class="collapse-sum" id="csum-loans"></span>
+          <span class="collapse-chev" aria-hidden="true"></span>
+        </button>
+        <div class="collapse-body">
+        <div class="collapse-tools"><button type="button" class="btn btn-ghost btn-sm" id="add-loan-btn">＋ 追加</button></div>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
           銀行の<strong>返済予定表</strong>から写してください。ペアローンは2件登録します。<br>
           ・現在残高 = 直近に返済した月の「返済後残高」/ 最終返済月 = 予定表の最後の月<br>
@@ -236,11 +264,17 @@
         <div id="loans-empty" style="color: var(--text-muted); font-size: 0.9rem; padding: 0.5rem 0;">
           住宅ローンはまだありません。「＋ 追加」で登録できます。
         </div>
+        </div>
       </div>
 
       <!-- 繰上げ返済 -->
-      <div class="card" id="prepay-card" style="display:none; margin-bottom: 1rem;">
-        <h3 style="margin: 0 0 0.6rem; font-size: 1rem;">繰上げ返済</h3>
+      <div class="card collapsible" data-key="prepay" data-default="closed" id="prepay-card" style="display:none;">
+        <button type="button" class="collapse-head" aria-expanded="true">
+          <span class="collapse-title">繰上げ返済</span>
+          <span class="collapse-sum" id="csum-prepay"></span>
+          <span class="collapse-chev" aria-hidden="true"></span>
+        </button>
+        <div class="collapse-body">
 
         <!-- しわ寄せチェック: 最終月の一括返済と、それを消す繰上げ額の逆算 -->
         <div id="balloon-check"></div>
@@ -294,11 +328,17 @@
 
         <!-- 効果の比較 (繰上げなし vs あり) -->
         <div id="prepay-effect" style="display:none; margin-top: 1rem; padding-top: 0.85rem; border-top: 1px dashed var(--border);"></div>
+        </div>
       </div>
 
       <!-- 金利シナリオ比較 (A/B) -->
-      <div class="card" id="rate-scenario-card" style="display:none; margin-bottom: 1rem;">
-        <h3 style="margin: 0 0 0.5rem; font-size: 1rem;">金利シナリオ比較 (A / B)</h3>
+      <div class="card collapsible" data-key="rate" data-default="closed" id="rate-scenario-card" style="display:none;">
+        <button type="button" class="collapse-head" aria-expanded="true">
+          <span class="collapse-title">金利シナリオ比較 (A / B)</span>
+          <span class="collapse-sum" id="csum-rate"></span>
+          <span class="collapse-chev" aria-hidden="true"></span>
+        </button>
+        <div class="collapse-body">
         <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.75rem;">
           <strong>シナリオA</strong> = 上のローン表に入力した金利。<strong>シナリオB</strong> = そこに指定の幅を上乗せした金利。<br>
           金利が上がった場合に負担がどう変わるかを比較できます(繰上げ返済の予定はA・Bとも同じものを使います)。
@@ -311,19 +351,32 @@
           </div>
         </div>
         <div id="rate-scenario-table" style="display:none; margin-top: 0.85rem;"></div>
+        </div>
       </div>
 
       <!-- グラフ -->
-      <h2 class="section-title" id="lp-chart-section">資産予測</h2>
-      <div class="card" style="margin-bottom: 1rem;">
+      <h2 class="section-title" id="lp-chart-section">試算の結果</h2>
+      <div class="card collapsible" data-key="chart" data-default="open">
+        <button type="button" class="collapse-head" aria-expanded="true">
+          <span class="collapse-title">資産予測グラフ</span>
+          <span class="collapse-sum" id="csum-chart"></span>
+          <span class="collapse-chev" aria-hidden="true"></span>
+        </button>
+        <div class="collapse-body">
         <div class="chart-container" style="height: 300px;">
           <canvas id="lp-chart"></canvas>
+        </div>
         </div>
       </div>
 
       <!-- 結果 (読み取り専用・年が横に並ぶキャッシュフロー表) -->
-      <h2 class="section-title">年別キャッシュフロー</h2>
-      <div class="card" style="padding: 0.75rem;">
+      <div class="card collapsible" data-key="matrix" data-default="open">
+        <button type="button" class="collapse-head" aria-expanded="true">
+          <span class="collapse-title">年別キャッシュフロー</span>
+          <span class="collapse-sum" id="csum-matrix"></span>
+          <span class="collapse-chev" aria-hidden="true"></span>
+        </button>
+        <div class="collapse-body">
         <p style="color: var(--text-muted); font-size: 0.82rem; margin: 0 0 0.5rem;">
           横にスクロールすると先の年が見られます(単位: 万円)。
         </p>
@@ -332,6 +385,7 @@
             <thead id="lp-thead"></thead>
             <tbody id="lp-tbody"></tbody>
           </table>
+        </div>
         </div>
       </div>
     </div>
@@ -1071,6 +1125,40 @@
       renderMatrix(years, hasLoans, hasPnlData, marks);
       drawChart(none, plan, scenarioB, hasLoans, rateDelta, milestones, planLabel);
       updatePlanHelps({ startY, retireYear, inflation, incomeGrowth, baseInc, retireExp });
+
+      // ---- 折りたたんだカードの見出しに出す要点 ----
+      const setSum = (key, html) => { const el = document.getElementById(`csum-${key}`); if (el) el.innerHTML = html; };
+      const pct = (v) => `${+(v * 100).toFixed(2)}%`;
+      const join = (arr) => arr.filter(Boolean).join(' ・ ');
+      setSum('assumptions', join([
+        `収入 ${formatYenShort(baseInc)}${incomeGrowth ? `(昇給${pct(incomeGrowth)})` : ''}`,
+        `生活費 ${formatYenShort(baseExp)}`,
+        `利回り ${pct(rate)}`,
+        inflation ? `インフレ ${pct(inflation)}` : null,
+        monthlyContrib ? `積立 月${formatYenShort(monthlyContrib)}` : null,
+      ]));
+      setSum('events', events.size ? `${events.size}件` : 'なし');
+      setSum('retire', join([
+        retireYear != null ? `${retireYear}年に退職` : '退職年は未設定',
+        retireExp != null ? `退職後の生活費 年${formatYenShort(retireExp)}` : null,
+        pensionYear != null ? `年金 ${pensionYear}年から年${formatYenShort(pensionAnnual)}` : null,
+      ]));
+      const loanBalSum = allLoans.reduce((sum, ln) => sum + ln.current_balance, 0);
+      const loanPaySum = loans.reduce((sum, ln) => sum + simulateLoan(loanSpec(ln), startIdx, []).firstPayment, 0);
+      setSum('loans', allLoans.length
+        ? join([`${allLoans.length}本`, `残高 ${formatYenShort(loanBalSum)}`, loans.length ? `毎月 ${formatYenShort(loanPaySum)}` : null])
+        : 'なし');
+      // 最終月の一括返済が残るローン (予定している繰上げは前提にする) — 閉じていても気づけるように赤字で
+      const balloonLoans = loans.filter(ln => simulateLoan(loanSpec(ln), startIdx, expandPrepays(prepays, ln.key)).balloon).length;
+      setSum('prepay', join([
+        prepays.length ? `予定 ${prepays.length}件` : '予定なし',
+        doPayoff ? `${prepayYear}年に一括返済` : null,
+        balloonLoans ? `<span class="warn">⚠️ 最終回の一括返済あり(${balloonLoans}本)</span>` : null,
+      ]));
+      setSum('rate', doRateB ? `B = ${rateDelta > 0 ? '+' : ''}${rateDelta}%` : '比較しない');
+      const lastRow = years[years.length - 1];
+      setSum('chart', `${lastRow.y}年の純資産 ${formatYenShort(lastRow.netWorth)}`);
+      setSum('matrix', `${startY}〜${endY}年`);
     }
 
     // 昇給率・退職後の生活費の注記 (退職年にいくらになるか)
@@ -1711,6 +1799,28 @@
         btn.disabled = false; btn.innerHTML = '💾 保存';
       }
     }));
+
+    // ======== 折りたたみ ========
+    // 開閉の状態はこの端末のブラウザに覚えておく (保存できない環境でも動くように try で囲む)
+    const collapseKey = (k) => `lp-collapse:${k}`;
+    function setCollapsed(card, closed, remember = true) {
+      card.classList.toggle('collapsed', closed);
+      card.querySelector('.collapse-head').setAttribute('aria-expanded', String(!closed));
+      if (remember) { try { localStorage.setItem(collapseKey(card.dataset.key), closed ? '1' : '0'); } catch {} }
+      // 閉じている間に描いたグラフは幅0になっているので、開いたら今の幅に合わせる。
+      // Chart.js はアニメーション中だとサイズ合わせを次の描画まで遅らせるので、先に止めてから合わせる
+      if (!closed && card.dataset.key === 'chart' && chart) { chart.stop(); chart.resize(); }
+    }
+    document.querySelectorAll('.collapsible').forEach(card => {
+      let closed = card.dataset.default === 'closed';
+      try { const v = localStorage.getItem(collapseKey(card.dataset.key)); if (v != null) closed = v === '1'; } catch {}
+      setCollapsed(card, closed, false);
+      card.querySelector('.collapse-head').addEventListener('click', () => setCollapsed(card, !card.classList.contains('collapsed')));
+    });
+    document.getElementById('expand-all').addEventListener('click', () =>
+      document.querySelectorAll('.collapsible').forEach(c => setCollapsed(c, false)));
+    document.getElementById('collapse-all').addEventListener('click', () =>
+      document.querySelectorAll('.collapsible').forEach(c => setCollapsed(c, true)));
 
     // 初期描画
     recompute();
