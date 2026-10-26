@@ -26,6 +26,15 @@
         <span id="household-greeting"></span>
       </p>
 
+      <!-- 純資産 (住宅ローン差引後)。ローンはライフプランの入力から今の残高を計算する -->
+      <div class="card networth-card" id="networth-card" style="display:none; margin-bottom: 1rem;">
+        <p class="card-title">純資産 (住宅ローン差引後)</p>
+        <p class="card-value" id="nw-value">—</p>
+        <p class="card-sub" id="nw-sub"></p>
+        <p class="card-sub" id="nw-breakdown" style="font-size: 0.8rem;"></p>
+        <p class="card-sub" id="nw-note" style="font-size: 0.72rem; opacity: 0.75;"></p>
+      </div>
+
       <!-- メトリクスカード4枚 -->
       <div class="grid cols-4">
         <div class="card">
@@ -95,8 +104,16 @@
               <span id="comp-expense" class="card-sub down" style="font-variant-numeric: tabular-nums;">—</span>
             </div>
             <div style="display:flex; justify-content: space-between; margin-top: 0.25rem; padding-top: 0.5rem; border-top: 1px dashed var(--border);">
-              <span style="font-weight: 600;">純資産</span>
+              <span style="font-weight: 600;" id="comp-net-label">純資産</span>
               <span id="comp-net" style="font-variant-numeric: tabular-nums; font-weight: 700;">—</span>
+            </div>
+            <div style="display:none; justify-content: space-between;" id="comp-loan-row">
+              <span style="color: var(--text-muted);">住宅ローン残高</span>
+              <span id="comp-loan" class="card-sub down" style="font-variant-numeric: tabular-nums;">—</span>
+            </div>
+            <div style="display:none; justify-content: space-between; margin-top: 0.25rem; padding-top: 0.5rem; border-top: 1px dashed var(--border);" id="comp-nw-row">
+              <span style="font-weight: 600;">純資産 (ローン差引後)</span>
+              <span id="comp-nw" style="font-variant-numeric: tabular-nums; font-weight: 700;">—</span>
             </div>
           </div>
           <div id="composition-empty" class="empty-state" style="display:none; padding: 2rem 1rem;">
@@ -170,17 +187,11 @@
           <canvas id="expense-chart"></canvas>
         </div>
       </div>
-      <div class="card" style="padding: 0;">
-        <div class="table-wrap">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>月</th>
-                <th class="num">支出</th>
-                <th class="num">前月比</th>
-                <th class="num">前年同月比</th>
-              </tr>
-            </thead>
+      <div class="card" style="padding: 0.75rem;">
+        <p style="color: var(--text-muted); font-size: 0.8rem; margin: 0 0 0.5rem;">月が横に並びます(右端が最新。左にスクロールすると前の月)。</p>
+        <div class="table-wrap" id="expense-trend-wrap">
+          <table class="table matrix-table">
+            <thead id="expense-trend-thead"></thead>
             <tbody id="expense-trend-tbody"></tbody>
           </table>
         </div>
@@ -195,7 +206,8 @@
   <script type="module">
     import { requireAuth } from '/js/supabase.js';
     import { renderNav } from '/js/nav.js';
-    import { listAccounts, getAssetTrend } from '/js/api.js';
+    import { listAccounts, getAssetTrend, listLifePlanLoans } from '/js/api.js';
+    import { balanceAtMonthEnd, monthIndex, monthLabel } from '/js/loan.js';
     import { formatYen, formatYenShort, formatPercent } from '/js/utils.js';
 
     const auth = await requireAuth();
@@ -220,6 +232,16 @@
       listAccounts({ includeInactive: true }),
       getAssetTrend(),
     ]);
+
+    // 住宅ローン (ライフプランの入力)。未入力やDBの準備前でもホームは出せるように、失敗したら無しとして扱う
+    let lifeLoans = [];
+    try {
+      lifeLoans = (await listLifePlanLoans()).filter(l => Number(l.current_balance) > 0);
+    } catch (err) {
+      console.warn('住宅ローンを読み込めませんでした', err);
+    }
+    // その月の月末時点の住宅ローン残高の合計 (date = 'YYYY-MM-DD')
+    const loanBalanceAt = (date) => lifeLoans.reduce((sum, l) => sum + balanceAtMonthEnd(l, monthIndex(date.slice(0, 7))), 0);
 
     // datalabels プラグインを登録
     Chart.register(ChartDataLabels);
@@ -276,46 +298,78 @@
       if (pct >= 100) progBar.style.background = 'var(--success)';
     }
 
-    // ============ 支出推移テーブル (数値表示・新しい月が上) ============
+    // ============ 純資産 (住宅ローン差引後) ============
+    // 資産 − 支払予定 − 住宅ローン残高。ローン残高はライフプランの入力 (残高・入力月・返済条件) から、その月末時点を計算する
+    function renderNetWorthCard(latest, prev) {
+      const card = document.getElementById('networth-card');
+      if (!lifeLoans.length) { card.style.display = 'none'; return; }
+      const loanNow = loanBalanceAt(latest.date);
+      const nw = latest.net - loanNow;
+      card.style.display = 'block';
+      document.getElementById('nw-value').textContent = formatYen(nw);
+      const sub = document.getElementById('nw-sub');
+      if (prev) {
+        const d = nw - (prev.net - loanBalanceAt(prev.date));
+        sub.textContent = `前月比 ${d >= 0 ? '+' : ''}${formatYenShort(d)}`;
+        sub.className = `card-sub ${d >= 0 ? 'up' : 'down'}`;
+      } else {
+        sub.textContent = '';
+      }
+      document.getElementById('nw-breakdown').textContent =
+        `資産 ${formatYenShort(latest.total)}${latest.expense > 0 ? ` − 支払予定 ${formatYenShort(latest.expense)}` : ''} − 住宅ローン残高 ${formatYenShort(loanNow)}`;
+      document.getElementById('nw-note').textContent =
+        `住宅ローン残高は${monthLabel(monthIndex(latest.date.slice(0, 7)))}末時点の推定 (ライフプランの入力から計算)`;
+
+      // 資産構成のまとめにも同じ内訳を出す
+      document.getElementById('comp-net-label').textContent = '支払予定を引いた資産';
+      document.getElementById('comp-loan-row').style.display = 'flex';
+      document.getElementById('comp-loan').textContent = `-${formatYen(loanNow)}`;
+      document.getElementById('comp-nw-row').style.display = 'flex';
+      document.getElementById('comp-nw').textContent = formatYen(nw);
+    }
+
+    // ============ 支出推移テーブル (月が横に並ぶ・右端が最新) ============
     function renderExpenseTrend() {
+      const thead = document.getElementById('expense-trend-thead');
       const tbody = document.getElementById('expense-trend-tbody');
+      const wrap = document.getElementById('expense-trend-wrap');
       const empty = document.getElementById('expense-trend-empty');
-      // 支出が1件でもある月だけを対象に、新しい順
+      // 支出が1件でもある月だけを対象に、直近24ヶ月まで (古い→新しい)
       const withExpense = trend.filter(t => t.expense > 0);
       if (withExpense.length === 0) {
-        tbody.closest('.table-wrap').style.display = 'none';
+        wrap.style.display = 'none';
         empty.style.display = 'block';
         return;
       }
-      // 直近24ヶ月まで、新しい月が上
-      const rows = withExpense.slice(-24).reverse();
-      tbody.innerHTML = '';
-      for (let i = 0; i < rows.length; i++) {
-        const cur = rows[i];
-        const older = rows[i + 1]; // 配列は新→古なので次要素が前月
-        let diffStr = '—', diffCls = '';
-        if (older) {
-          const diff = cur.expense - older.expense;
-          diffCls = diff > 0 ? 'down' : (diff < 0 ? 'up' : ''); // 支出は増=赤(down色)、減=緑(up色)
-          diffStr = `${diff >= 0 ? '+' : ''}${formatYenShort(diff)}`;
-        }
-        // 前年同月比
-        let yoyStr = '—', yoyCls = '';
-        const ya = yearAgoValue(cur.date.slice(0, 7), 'expense');
-        if (ya != null && ya > 0) {
-          const yd = cur.expense - ya;
-          yoyCls = yd > 0 ? 'down' : (yd < 0 ? 'up' : '');
-          yoyStr = `${yd >= 0 ? '+' : ''}${formatYenShort(yd)}`;
-        }
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${cur.date.slice(0, 7)}</td>
-          <td class="num">${formatYen(cur.expense)}</td>
-          <td class="num"><span class="card-sub ${diffCls}">${diffStr}</span></td>
-          <td class="num"><span class="card-sub ${yoyCls}">${yoyStr}</span></td>
-        `;
-        tbody.appendChild(tr);
-      }
+      const months = withExpense.slice(-24);
+
+      // 増減のセル。支出は増えたら赤(down色)、減ったら緑(up色)
+      const diffCell = (d) => {
+        if (d == null) return '<td>—</td>';
+        const cls = d > 0 ? 'down' : (d < 0 ? 'up' : '');
+        return `<td><span class="card-sub ${cls}">${d >= 0 ? '+' : ''}${formatYenShort(d)}</span></td>`;
+      };
+      const prevDiffs = months.map((m, i) => {
+        // 一覧の1つ前ではなく、暦の前月と比べる (支出が入っていない月をまたがないように)
+        const ym = m.date.slice(0, 7);
+        const [y, mo] = ym.split('-').map(Number);
+        const prevYm = mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
+        const p = trendByYM.get(prevYm);
+        return (p && p.expense > 0) ? m.expense - p.expense : null;
+      });
+      const yoyDiffs = months.map(m => {
+        const ya = yearAgoValue(m.date.slice(0, 7), 'expense');
+        return (ya != null && ya > 0) ? m.expense - ya : null;
+      });
+
+      thead.innerHTML = `<tr><th class="row-head">月</th>${months.map(m => `<th>${m.date.slice(0, 4)}/${m.date.slice(5, 7)}</th>`).join('')}</tr>`;
+      tbody.innerHTML = [
+        `<tr class="emphasis"><th class="row-head">支出</th>${months.map(m => `<td>${formatYenShort(m.expense)}</td>`).join('')}</tr>`,
+        `<tr><th class="row-head">前月比</th>${prevDiffs.map(diffCell).join('')}</tr>`,
+        `<tr><th class="row-head">前年同月比</th>${yoyDiffs.map(diffCell).join('')}</tr>`,
+      ].join('');
+      // 開いたときに最新の月 (右端) が見えるように
+      wrap.scrollLeft = wrap.scrollWidth;
     }
     renderExpenseTrend();
 
@@ -557,6 +611,9 @@
       } else {
         breakdown.textContent = '';
       }
+
+      // 純資産 (住宅ローン差引後)
+      renderNetWorthCard(latest, prev);
 
       // カード2/3/4: 目標関連 — net 基準で計算
       renderTargetCards(latest.net);

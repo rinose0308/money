@@ -483,7 +483,7 @@ export async function listLifePlanYears() {
 export async function listLifePlanLoans() {
   const { data, error } = await supabase
     .from('life_plan_loans')
-    .select('id, member_id, label, current_balance, interest_rate, start_year, term_years, final_month, monthly_payment, five_year_rule, next_review_month, review_rule, rate_change_month, rate_after, display_order')
+    .select('id, member_id, label, current_balance, interest_rate, start_year, term_years, final_month, monthly_payment, five_year_rule, next_review_month, review_rule, rate_change_month, rate_after, balance_month, display_order, created_at')
     .order('display_order', { ascending: true })
     .order('created_at', { ascending: true });
   if (error) throw error;
@@ -523,6 +523,7 @@ export async function replaceLifePlanLoans(rows) {
       review_rule: r.review_rule ?? null,
       rate_change_month: r.rate_change_month ?? null,
       rate_after: r.rate_after ?? null,
+      balance_month: r.balance_month ?? null,
       display_order: idx,
     })))
     .select();

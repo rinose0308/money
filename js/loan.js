@@ -39,9 +39,15 @@ export function levelPayment(balance, ratePct, n) {
 const REVIEW_STEP = { five: 60, half: 6 };
 
 // spec: { balance, ratePct, finalIdx, payment (null=自動), rule ('none'|'five'|'half'), reviewIdx,
-//         rateChangeIdx, rateAfter }   ※ 旧形式の fiveYear: true は rule: 'five' とみなす
+//         rateChangeIdx, rateAfter, balanceIdx }   ※ 旧形式の fiveYear: true は rule: 'five' とみなす
 // startIdx: この月の返済から計算を始める (balance はその直前の残高)
+// balanceIdx: 残高を入力した月。startIdx より前なら、その月から startIdx の前月まで返済を進めた状態で返す
 export function createLoan(spec, startIdx) {
+  if (spec.balanceIdx != null && spec.balanceIdx < startIdx) {
+    const L = createLoan({ ...spec, balanceIdx: null }, spec.balanceIdx);
+    for (let idx = spec.balanceIdx; idx < startIdx && !L.done; idx++) stepMonth(L, idx);
+    return L;
+  }
   const balance = Math.max(0, Math.round(spec.balance || 0));
   const n = spec.finalIdx - startIdx + 1;
   const auto = !(spec.payment > 0);
@@ -218,4 +224,34 @@ export function solveLumpPrepay(spec, startIdx, basePrepays) {
   const ok = (x) => !simulateLoan(spec, startIdx,
     x > 0 ? [...basePrepays, { year, amount: x, mode: 'shorten' }] : basePrepays).balloon;
   return smallestAmount(ok, Math.max(spec.balance, 10000));
+}
+
+// ライフプランのローン1件 (画面の入力値でも DB の行でも同じ項目名) → エンジン用の仕様
+//   rateDelta = 金利シナリオBの上乗せ幅 (変更後の金利にもかける)
+export function loanSpecFromFields(f, rateDelta = 0) {
+  const rule = ['none', 'five', 'half'].includes(f.review_rule) ? f.review_rule : (f.five_year_rule ? 'five' : 'none');
+  const rateChangeIdx = monthIndex(f.rate_change_month);
+  const rateAfter = (f.rate_after != null && f.rate_after !== '') ? Number(f.rate_after) : null;
+  const pct = (v) => Math.max(0, Math.round(v * 1e6) / 1e6);   // 1.14 + 1 = 2.1399999… のような誤差を消す
+  return {
+    balance: Number(f.current_balance) || 0,
+    ratePct: pct((Number(f.interest_rate) || 0) + rateDelta),
+    finalIdx: monthIndex(f.final_month),
+    payment: Number(f.monthly_payment) > 0 ? Number(f.monthly_payment) : null,
+    rule,
+    reviewIdx: monthIndex(f.next_review_month),
+    rateChangeIdx: (rateChangeIdx != null && rateAfter != null) ? rateChangeIdx : null,
+    rateAfter: rateAfter != null ? pct(rateAfter + rateDelta) : null,
+    // 残高を入力した月。0015 より前のデータは記録がないので、最後に保存した月 (= 残高を入れた月) で補う
+    balanceIdx: monthIndex(f.balance_month ?? (f.created_at ? String(f.created_at).slice(0, 7) : null)),
+  };
+}
+
+// その月の返済が済んだ時点 (月末) の残高。未払利息も含む。最終返済月が未入力なら入力した残高のまま
+export function balanceAtMonthEnd(f, monthIdx) {
+  const spec = loanSpecFromFields(f);
+  if (spec.finalIdx == null) return spec.balance;
+  if (monthIdx >= spec.finalIdx) return 0;
+  const L = createLoan(spec, monthIdx + 1);
+  return L.balance + L.unpaid;
 }

@@ -401,7 +401,7 @@
     } from '/js/api.js';
     import { formatYen, formatYenShort, toast, withErrorToast } from '/js/utils.js';
     import {
-      monthIndex, monthLabel, yearOf, levelPayment,
+      monthIndex, monthStr, monthLabel, yearOf, levelPayment, loanSpecFromFields,
       createLoan, prepayLoan, stepMonth, isBalloon,
       simulateLoan, solveYearlyPrepay, solveLumpPrepay,
     } from '/js/loan.js';
@@ -434,7 +434,7 @@
         ? `<div class="empty-state" style="max-width:520px;margin:0 auto;">
              <h3>データベースの準備が必要です</h3>
              <p style="margin:0.5rem 0;">ライフプラン用のテーブルがまだ作成されていません。<br>
-             Supabase の SQL Editor で <code>0006</code>〜<code>0014</code> のマイグレーション(<code>supabase/migrations/</code>)を実行してください。</p>
+             Supabase の SQL Editor で <code>0006</code>〜<code>0015</code> のマイグレーション(<code>supabase/migrations/</code>)を実行してください。</p>
              <button class="btn btn-primary btn-sm" onclick="location.reload()">実行したら再読み込み</button>
            </div>`
         : `<div class="empty-state" style="max-width:520px;margin:0 auto;">
@@ -636,11 +636,13 @@
       // 旧データの借入年・返済年数は、保存時にそのまま書き戻す
       if (loan.start_year != null) tr.dataset.startYear = loan.start_year;
       if (loan.term_years != null) tr.dataset.termYears = loan.term_years;
+      // 現在残高を入力した月 (この月の返済前の残高として扱い、以後の返済は計算で進める)
+      tr.dataset.balanceMonth = loan.balance_month || monthStr(nowMonthIdx);
       // 返済額の見直し方式。0014 より前のデータは five_year_rule から判断する
       const rule = ['none', 'five', 'half'].includes(loan.review_rule) ? loan.review_rule : (loan.five_year_rule ? 'five' : 'none');
       tr.innerHTML = `
         <td data-label="名義"><select class="form-select ln-member" style="min-width:110px;">${memberOptions(loan.member_id)}</select></td>
-        <td class="num" data-label="現在残高"><input type="number" inputmode="numeric" class="form-input ln-bal" style="text-align:right; max-width:150px;" value="${loan.current_balance ?? ''}"></td>
+        <td class="num" data-label="現在残高"><div class="cell-stack"><input type="number" inputmode="numeric" class="form-input ln-bal" style="text-align:right; max-width:150px;" value="${loan.current_balance ?? ''}"><span class="ln-bal-note"></span></div></td>
         <td class="num" data-label="金利(%)"><input type="number" step="0.001" inputmode="decimal" class="form-input ln-rate" style="text-align:right; max-width:90px;" value="${loan.interest_rate ?? ''}"></td>
         <td class="num" data-label="最終返済月"><input type="month" class="form-input ln-final" style="max-width:170px;${loan.final_derived ? ' border-color: var(--warning);' : ''}" value="${escapeHtml(loan.final_month ?? '')}"${loan.final_derived ? ' title="借入年+返済年数から仮に設定しました。予定表の最終返済月に合わせてください"' : ''}></td>
         <td class="num" data-label="毎月の返済額"><input type="number" inputmode="numeric" class="form-input ln-monthly" style="text-align:right; max-width:150px;" value="${loan.monthly_payment ?? ''}" placeholder="自動"></td>
@@ -671,6 +673,8 @@
         tr.querySelector('.ln-review').style.display = e.target.value === 'none' ? 'none' : '';
       });
       tr.querySelector('.ln-member').addEventListener('change', refreshPrepayTargets);
+      // 残高を打ち直したら「今月時点の残高」とみなす (再計算より先に登録)
+      tr.querySelector('.ln-bal').addEventListener('input', () => { tr.dataset.balanceMonth = monthStr(nowMonthIdx); });
       // 金利や残高を変えたら即再計算 (change だけでなく input でも拾う)
       tr.querySelectorAll('input, select').forEach(inp => {
         inp.addEventListener('input', recompute);
@@ -691,6 +695,8 @@
         monthly_payment: l.monthly_payment, five_year_rule: l.five_year_rule, next_review_month: l.next_review_month,
         review_rule: l.review_rule, rate_change_month: l.rate_change_month, rate_after: l.rate_after,
         start_year: l.start_year, term_years: l.term_years,
+        // 0015 より前のデータは入力月がないので、最後に保存した月 (= 残高を入れた月) とみなす
+        balance_month: l.balance_month ?? (l.created_at ? String(l.created_at).slice(0, 7) : null),
       });
     }
 
@@ -725,6 +731,7 @@
           rate_after: rchgRate === '' ? null : (parseFloat(rchgRate) || 0),
           start_year: tr.dataset.startYear ? +tr.dataset.startYear : null,
           term_years: tr.dataset.termYears ? +tr.dataset.termYears : null,
+          balance_month: tr.dataset.balanceMonth || null,
           _row: tr,
         });
       });
@@ -732,17 +739,8 @@
     }
 
     // 月次エンジン用の仕様 (rateDelta = 金利シナリオBの上乗せ幅)
-    const loanSpec = (ln, rateDelta = 0) => ({
-      balance: ln.current_balance,
-      ratePct: Math.max(0, (ln.interest_rate || 0) + rateDelta),
-      finalIdx: ln.finalIdx,
-      payment: ln.monthly_payment,
-      rule: ln.review_rule,
-      reviewIdx: ln.reviewIdx,
-      // 金利の変更予定 (シナリオBの上乗せは変更後の金利にもかける)
-      rateChangeIdx: (ln.rateChangeIdx != null && ln.rate_after != null) ? ln.rateChangeIdx : null,
-      rateAfter: ln.rate_after != null ? Math.max(0, ln.rate_after + rateDelta) : null,
-    });
+    // (ホームの「住宅ローン差引後の純資産」と同じ変換を使う。入力月から計算開始月までの返済は自動で進む)
+    const loanSpec = (ln, rateDelta = 0) => loanSpecFromFields(ln, rateDelta);
 
     // ======== 繰上げ返済の予定 ========
     const ppTbody = document.getElementById('prepays-tbody');
@@ -914,6 +912,15 @@
           ? `<strong style="color:var(--danger);">${formatYen(r.finalPay)}</strong><span class="sub">${monthLabel(ln.finalIdx)}</span><span class="sub">(通常 ${formatYen(r.lastPayment)})</span>`
           : '<span style="color:var(--success);">しわ寄せなし</span>';
         row.querySelector('.ln-interest').textContent = formatYen(r.interest);
+        // 入力した残高が前の月のものなら、今月までの返済を進めた残高を添える
+        const balIdx = monthIndex(ln.balance_month);
+        const note = row.querySelector('.ln-bal-note');
+        if (balIdx != null && balIdx < nowMonthIdx) {
+          const L = createLoan(loanSpec(ln), nowMonthIdx);
+          note.textContent = `${monthLabel(balIdx)}時点。今は約 ${formatYen(L.balance + L.unpaid)}`;
+        } else {
+          note.textContent = '';
+        }
       }
 
       // ---- 投影を1本走らせる ----
@@ -1793,6 +1800,7 @@
           final_month: l.final_month, monthly_payment: l.monthly_payment,
           five_year_rule: l.five_year_rule, next_review_month: l.next_review_month,
           review_rule: l.review_rule, rate_change_month: l.rate_change_month, rate_after: l.rate_after,
+          balance_month: l.balance_month,
         })));
         toast('保存しました', 'success');
       } finally {

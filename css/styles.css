@@ -794,3 +794,10 @@ input[type="number"] {
   .collapsible:not(.collapsed) .collapse-sum { display: none; }
   .collapse-body { padding: 0 0.85rem 0.9rem; }
 }
+
+/* ホーム: 純資産 (住宅ローン差引後) をいちばん目立たせる */
+.networth-card { border-left: 4px solid var(--primary); }
+.networth-card .card-value { font-size: 2rem; }
+@media (max-width: 639px) { .networth-card .card-value { font-size: 1.6rem !important; } }
+/* ライフプラン: 現在残高の下の「◯月時点。今は約 ¥…」 */
+.ln-bal-note { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
